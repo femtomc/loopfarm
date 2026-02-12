@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import __version__
 from .runtime.config import LoopfarmFileConfig, ProgramFileConfig, load_config
 from .runner import CodexPhaseModel, LoopfarmConfig, run_loop
 
@@ -15,14 +16,25 @@ def _print_help() -> None:
     console.print("[bold blue]loopfarm[/bold blue]  programmable loop runner")
     console.print()
     console.print("[dim]usage:[/dim] loopfarm [OPTIONS] PROMPT")
-    console.print("[dim]       [/dim] loopfarm init|forum|issue|monitor ...")
+    console.print("[dim]       [/dim] loopfarm <command> [ARGS]")
+    console.print()
+    console.print("[bold]Commands[/bold]")
+    console.print("  init      scaffold .loopfarm config + prompts for a new workspace")
+    console.print("  issue     create, update, and query issue tracker state")
+    console.print("  forum     post/read/search loopfarm forum topics/messages")
+    console.print("  sessions  list/show recent loop sessions and summaries")
+    console.print("  history   alias for `sessions list`")
+    console.print("  monitor   start the local monitor web UI and API server")
     console.print()
     console.print("[bold]Required Config[/bold]")
-    console.print("  .loopfarm/loopfarm.toml with a strict [program] block")
+    console.print("  .loopfarm/loopfarm.toml with a strict [program] block", markup=False)
+    console.print("  [program].steps defines phase IDs and loop order", markup=False)
+    console.print("  phase IDs are user-defined (pattern: [a-z][a-z0-9_-]*)", markup=False)
     console.print()
     console.print("[bold]Options[/bold]")
-    console.print("  --program NAME   program name (must match [program].name)")
-    console.print("  --project NAME   override [program].project")
+    console.print("  --program NAME   program name (must match [program].name)", markup=False)
+    console.print("  --project NAME   override [program].project", markup=False)
+    console.print("  --version        print installed loopfarm version")
     console.print("  -h, --help")
     console.print()
     console.print("[bold]Bootstrap[/bold]")
@@ -32,6 +44,7 @@ def _print_help() -> None:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="loopfarm", add_help=False)
     p.add_argument("-h", "--help", action="store_true", default=False)
+    p.add_argument("--version", action="store_true", default=False)
     p.add_argument("prompt", nargs=argparse.REMAINDER)
     p.add_argument("--program")
     p.add_argument("--project")
@@ -41,10 +54,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def _select_program(args: argparse.Namespace, file_cfg: LoopfarmFileConfig) -> ProgramFileConfig:
     program = file_cfg.program
     if program is None:
-        print(
-            "error: missing or invalid .loopfarm/loopfarm.toml [program] configuration",
-            file=sys.stderr,
-        )
+        message = file_cfg.error or "missing or invalid .loopfarm/loopfarm.toml [program] configuration"
+        print(f"error: {message}", file=sys.stderr)
         raise SystemExit(2)
 
     requested = (args.program or "").strip()
@@ -60,8 +71,6 @@ def _select_program(args: argparse.Namespace, file_cfg: LoopfarmFileConfig) -> P
 
 def _required_phases(program: ProgramFileConfig) -> list[str]:
     phases: list[str] = []
-    if program.loop_plan_once:
-        phases.append("planning")
     for phase, _ in program.loop_steps:
         if phase not in phases:
             phases.append(phase)
@@ -71,6 +80,7 @@ def _required_phases(program: ProgramFileConfig) -> list[str]:
 def _resolve_phase_overrides(
     *,
     program: ProgramFileConfig,
+    repo_root: Path,
 ) -> tuple[
     tuple[tuple[str, str], ...],
     tuple[tuple[str, str], ...],
@@ -97,6 +107,15 @@ def _resolve_phase_overrides(
         if not prompt_path:
             print(
                 f"error: missing prompt for phase {phase!r} in [program.phase.{phase}]",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        prompt_file = Path(prompt_path)
+        if not prompt_file.is_absolute():
+            prompt_file = repo_root / prompt_file
+        if not prompt_file.exists() or not prompt_file.is_file():
+            print(
+                f"error: prompt file not found: {prompt_path} (phase: {phase})",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -160,17 +179,33 @@ def main(argv: list[str] | None = None) -> None:
 
             monitor_main(sub_argv)
             return
+        if command == "sessions":
+            from .sessions import main as sessions_main
+
+            sessions_main(sub_argv or ["list"])
+            return
+        if command == "history":
+            from .sessions import main as sessions_main
+
+            if sub_argv and sub_argv[0] in {"list", "show"}:
+                sessions_main(sub_argv)
+            else:
+                sessions_main(["list", *sub_argv])
+            return
 
     args = _build_parser().parse_args(raw_argv)
 
     if args.help:
         _print_help()
         raise SystemExit(0)
+    if args.version:
+        print(__version__)
+        raise SystemExit(0)
 
     prompt = " ".join(args.prompt).strip()
     if not prompt:
         _print_help()
-        raise SystemExit(1)
+        raise SystemExit(0)
 
     repo_root = Path.cwd()
     file_cfg = load_config(repo_root)
@@ -181,7 +216,7 @@ def main(argv: list[str] | None = None) -> None:
         phase_prompt_overrides,
         phase_injections,
         phase_models,
-    ) = _resolve_phase_overrides(program=program)
+    ) = _resolve_phase_overrides(program=program, repo_root=repo_root)
 
     project = args.project or program.project or repo_root.name
 
@@ -189,7 +224,6 @@ def main(argv: list[str] | None = None) -> None:
         repo_root=repo_root,
         project=str(project),
         prompt=prompt,
-        loop_plan_once=program.loop_plan_once,
         loop_steps=program.loop_steps,
         termination_phase=program.termination_phase,
         loop_report_source_phase=program.report_source_phase,

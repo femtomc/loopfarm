@@ -68,7 +68,7 @@ class PromptResolver:
             if not text:
                 continue
             label = phase.capitalize()
-            if iteration is not None and phase != "planning":
+            if iteration is not None:
                 label = f"{label} #{iteration}"
             lines.append("")
             lines.append(f"### {label}")

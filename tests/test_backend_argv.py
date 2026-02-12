@@ -16,7 +16,6 @@ def _cfg(tmp_path: Path) -> LoopfarmConfig:
         repo_root=tmp_path,
         project="test",
         prompt="Example prompt",
-        loop_plan_once=True,
         loop_steps=(("forward", 1), ("backward", 1)),
         termination_phase="backward",
         phase_models=(

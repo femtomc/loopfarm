@@ -32,16 +32,29 @@ CREATE INDEX IF NOT EXISTS idx_forum_messages_topic_created
 @dataclass
 class ForumStore:
     root: Path
+    create_on_connect: bool = True
 
     @classmethod
-    def from_workdir(cls, cwd: Path | None = None) -> "ForumStore":
-        return cls(resolve_state_dir(cwd))
+    def from_workdir(
+        cls,
+        cwd: Path | None = None,
+        *,
+        create: bool = True,
+    ) -> "ForumStore":
+        return cls(
+            resolve_state_dir(cwd, create=create),
+            create_on_connect=create,
+        )
 
     @property
     def db_path(self) -> Path:
         return self.root / "forum.sqlite3"
 
     def _connect(self) -> sqlite3.Connection:
+        if self.create_on_connect:
+            self.root.mkdir(parents=True, exist_ok=True)
+        elif not self.db_path.exists():
+            raise FileNotFoundError(str(self.db_path))
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
@@ -119,6 +132,8 @@ class ForumStore:
         topic_name = topic.strip()
         if not topic_name:
             return []
+        if not self.db_path.exists():
+            return []
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -144,6 +159,9 @@ class ForumStore:
         return out
 
     def topics(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        if not self.db_path.exists():
+            return []
+
         query = (
             "SELECT name, created_at, updated_at, message_count "
             "FROM forum_topics ORDER BY updated_at DESC, name ASC"
@@ -166,6 +184,8 @@ class ForumStore:
         ]
 
     def show(self, message_id: int) -> dict[str, Any] | None:
+        if not self.db_path.exists():
+            return None
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -194,6 +214,8 @@ class ForumStore:
     ) -> list[dict[str, Any]]:
         text = query.strip()
         if not text:
+            return []
+        if not self.db_path.exists():
             return []
 
         like = f"%{text}%"

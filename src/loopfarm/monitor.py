@@ -950,7 +950,8 @@ def main(argv: list[str] | None = None) -> None:
     server = ThreadingHTTPServer((cfg.host, cfg.port), handler_cls)
     print(
         f"loopfarm monitor listening on http://{cfg.host}:{cfg.port} "
-        f"(repo={cfg.repo_root})"
+        f"(repo={cfg.repo_root})",
+        flush=True,
     )
     try:
         server.serve_forever(poll_interval=0.5)

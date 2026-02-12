@@ -99,16 +99,29 @@ def _normalize_relation(rel_type: str) -> tuple[str, bool]:
 @dataclass
 class IssueStore:
     root: Path
+    create_on_connect: bool = True
 
     @classmethod
-    def from_workdir(cls, cwd: Path | None = None) -> "IssueStore":
-        return cls(resolve_state_dir(cwd))
+    def from_workdir(
+        cls,
+        cwd: Path | None = None,
+        *,
+        create: bool = True,
+    ) -> "IssueStore":
+        return cls(
+            resolve_state_dir(cwd, create=create),
+            create_on_connect=create,
+        )
 
     @property
     def db_path(self) -> Path:
         return self.root / "issue.sqlite3"
 
     def _connect(self) -> sqlite3.Connection:
+        if self.create_on_connect:
+            self.root.mkdir(parents=True, exist_ok=True)
+        elif not self.db_path.exists():
+            raise FileNotFoundError(str(self.db_path))
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
@@ -164,6 +177,8 @@ class IssueStore:
         issue_key = issue_id.strip()
         if not issue_key:
             return None
+        if not self.db_path.exists():
+            return None
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -195,6 +210,9 @@ class IssueStore:
         tag: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        if not self.db_path.exists():
+            return []
+
         where: list[str] = []
         params: list[Any] = []
 
@@ -318,6 +336,20 @@ class IssueStore:
     def set_priority(self, issue_id: str, priority: int) -> dict[str, Any]:
         return self.update(issue_id, priority=priority)
 
+    def delete(self, issue_id: str) -> dict[str, Any]:
+        issue_key = issue_id.strip()
+        if not issue_key:
+            raise ValueError("issue id cannot be empty")
+
+        issue = self.get(issue_key)
+        if issue is None:
+            raise ValueError(f"unknown issue: {issue_key}")
+
+        with self._connect() as conn:
+            conn.execute("DELETE FROM issues WHERE id = ?", (issue_key,))
+
+        return {"id": issue_key, "deleted": True}
+
     def add_tag(self, issue_id: str, tag: str) -> dict[str, Any]:
         issue_key = issue_id.strip()
         value = tag.strip()
@@ -409,6 +441,8 @@ class IssueStore:
         issue_key = issue_id.strip()
         if not issue_key:
             return []
+        if not self.db_path.exists():
+            return []
 
         with self._connect() as conn:
             rows = conn.execute(
@@ -474,6 +508,8 @@ class IssueStore:
     def dependencies(self, issue_id: str) -> list[dict[str, Any]]:
         issue_key = issue_id.strip()
         if not issue_key:
+            return []
+        if not self.db_path.exists():
             return []
 
         with self._connect() as conn:

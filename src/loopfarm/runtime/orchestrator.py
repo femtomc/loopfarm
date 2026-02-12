@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Callable, Protocol
 
 class OrchestratorConfig(Protocol):
-    loop_plan_once: bool
     loop_steps: tuple[tuple[str, int], ...]
     termination_phase: str
     loop_report_source_phase: str | None

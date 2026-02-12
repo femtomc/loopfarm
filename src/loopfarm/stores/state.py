@@ -9,7 +9,7 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def resolve_state_dir(cwd: Path | None = None) -> Path:
+def resolve_state_dir(cwd: Path | None = None, *, create: bool = True) -> Path:
     """Return the loopfarm state directory, creating it if needed.
 
     Resolution order:
@@ -29,5 +29,6 @@ def resolve_state_dir(cwd: Path | None = None) -> Path:
                 state_dir = candidate
                 break
 
-    state_dir.mkdir(parents=True, exist_ok=True)
+    if create:
+        state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir

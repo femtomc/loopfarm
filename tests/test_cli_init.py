@@ -20,7 +20,7 @@ def test_init_creates_scaffold(monkeypatch, tmp_path: Path) -> None:
     text = config.read_text(encoding="utf-8")
     assert "[program]" in text
     assert f'project = "{tmp_path.name}"' in text
-    assert "steps = [\"planning\", \"forward*5\", \"documentation\", \"architecture\", \"backward\"]" in text
+    assert "steps = [\"forward*5\", \"documentation\", \"architecture\", \"backward\"]" in text
 
 
 def test_init_skips_existing_files_without_force(monkeypatch, tmp_path: Path) -> None:

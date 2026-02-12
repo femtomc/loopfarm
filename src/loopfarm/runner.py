@@ -52,7 +52,6 @@ class LoopfarmConfig:
     repo_root: Path
     project: str
     prompt: str
-    loop_plan_once: bool
     loop_steps: tuple[tuple[str, int], ...]
     termination_phase: str
     loop_report_source_phase: str | None = None
@@ -204,7 +203,6 @@ class LoopfarmRunner:
                 "prompt": self.cfg.prompt,
                 "project": self.cfg.project,
                 "repo_root": str(self.cfg.repo_root),
-                "loop_plan_once": self.cfg.loop_plan_once,
                 "loop_steps": list(self.cfg.loop_steps),
                 "termination_phase": self.cfg.termination_phase,
                 "loop_report_source_phase": self.cfg.loop_report_source_phase,
@@ -229,15 +227,6 @@ class LoopfarmRunner:
         )
 
         try:
-            if self.cfg.loop_plan_once:
-                self._planning_phase(session_id)
-            else:
-                self._print(f"\n{GRAY}◆ PLANNING{RESET} {GRAY}(skipped){RESET}\n")
-                self._emit(
-                    "phase.skip",
-                    phase="planning",
-                    payload={"reason": "program"},
-                )
             return self._configured_loop(session_id)
         except StopRequested:
             return 1
@@ -360,13 +349,6 @@ class LoopfarmRunner:
 
     def _prompt_path(self, phase: str) -> Path:
         return self.prompt_resolver.prompt_path(phase)
-
-    def _planning_phase(self, session_id: str) -> None:
-        self.last_phase = "planning"
-        self.phase_executor.planning_phase(session_id)
-
-    def _phase_presentation(self, phase: str) -> tuple[str, str]:
-        return self.phase_executor.phase_presentation(phase)
 
     def _run_operational_phase(
         self,

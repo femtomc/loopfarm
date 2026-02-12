@@ -66,79 +66,8 @@ class PhaseExecutor:
         self.palette = palette
 
     def phase_presentation(self, phase: str) -> tuple[str, str]:
-        if phase == "forward":
-            return "▶ FORWARD", self.palette.green
-        if phase == "research":
-            return "◆ RESEARCH", self.palette.cyan
-        if phase == "curation":
-            return "◆ CURATION", self.palette.white
-        if phase == "documentation":
-            return "◆ DOCUMENTATION", self.palette.blue
-        if phase == "architecture":
-            return "◆ ARCHITECTURE", self.palette.yellow
-        if phase == "backward":
-            return "◀ BACKWARD", self.palette.magenta
-        return phase.upper(), self.palette.white
-
-    def planning_phase(self, session_id: str) -> None:
-        self.control_checkpoint(session_id=session_id, phase="planning", iteration=None)
-        phase_start = utc_now_iso()[11:19]
-        self.print_line(
-            f"\n{self.palette.cyan}◆ PLANNING{self.palette.reset} "
-            f"{self.palette.gray}{phase_start}{self.palette.reset}"
-        )
-        self.print_line(
-            f"{self.palette.gray}─────────────────────────────────────────────────────────"
-            f"{self.palette.reset}\n"
-        )
-        self.emit(
-            "phase.start",
-            phase="planning",
-            payload={
-                "started": phase_start,
-                "prompt": self.prompt,
-                "prompt_path": str(self.prompt_path("planning")),
-            },
-        )
-
-        planning_prompt = self.build_phase_prompt(session_id, "planning")
-        out_path = self.tmp_path(prefix="planning_", suffix=".jsonl")
-        last_path = self.tmp_path(prefix="planning_", suffix=".last.txt")
-
-        ok = self.run_agent(
-            "planning",
-            planning_prompt,
-            out_path,
-            last_path,
-            iteration=None,
-        )
-
-        if not ok:
-            self.emit(
-                "phase.error",
-                phase="planning",
-                payload={
-                    "ok": False,
-                    "output_path": str(out_path),
-                    "last_message_path": str(last_path),
-                },
-            )
-            self.print_line(f"{self.palette.red}✗ Planning failed{self.palette.reset}")
-            raise SystemExit(1)
-
-        summary = self.phase_summary("planning", out_path, last_path)
-        self.emit(
-            "phase.end",
-            phase="planning",
-            payload={
-                "ok": True,
-                "summary": summary,
-                "output_path": str(out_path),
-                "last_message_path": str(last_path),
-            },
-        )
-        self.store_phase_summary(session_id, "planning", 0, summary)
-        self.cleanup_paths(out_path, last_path)
+        label = phase.replace("_", " ").replace("-", " ").strip().upper()
+        return f"◆ {label}", self.palette.white
 
     def run_operational_phase(
         self,

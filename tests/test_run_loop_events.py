@@ -5,7 +5,7 @@ import io
 import os
 from pathlib import Path
 
-from loopfarm.events import LoopfarmEvent
+from loopfarm.runtime.events import LoopfarmEvent
 from loopfarm.runner import CodexPhaseModel, LoopfarmConfig, LoopfarmIO, LoopfarmRunner, run_loop
 
 

@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config_file import LoopfarmFileConfig, ProgramFileConfig, load_config
+from .runtime.config import LoopfarmFileConfig, ProgramFileConfig, load_config
 from .runner import CodexPhaseModel, LoopfarmConfig, run_loop
 
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from .prompting import assemble_prompt, render_prompt
-from .session_store import SessionStore
-from .templates import TemplateContext
+from ..prompting import assemble_prompt, render_prompt
+from ..stores.session import SessionStore
+from ..templates import TemplateContext
 
 
 class PromptConfig(Protocol):

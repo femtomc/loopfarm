@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from loopfarm.session_store import (
+from loopfarm.stores.session import (
     CONTROL_STATE_SCHEMA,
     SESSION_META_SCHEMA,
     SessionStore,

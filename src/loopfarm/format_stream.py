@@ -18,7 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .events import StreamEventSink
+from .runtime.events import StreamEventSink
 from .util import env_flag, env_int
 
 

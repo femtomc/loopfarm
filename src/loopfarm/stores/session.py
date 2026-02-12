@@ -4,8 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
-from .forum import Forum
-from .util import utc_now_iso
+from ..forum import Forum
+from ..util import utc_now_iso
 
 # Forum topic schemas (append-only).
 # loopfarm:session:<session_id> -> SessionMeta (schema loopfarm.session.meta.v1)

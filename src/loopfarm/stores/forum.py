@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .storage import now_ms, resolve_state_dir
+from .state import now_ms, resolve_state_dir
 
 
 _SCHEMA = """

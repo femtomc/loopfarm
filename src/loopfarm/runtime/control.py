@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .session_store import SessionStore
-from .util import env_int, utc_now_iso
+from ..stores.session import SessionStore
+from ..util import env_int, utc_now_iso
 
 
 EmitFn = Callable[[str, dict[str, Any]], None]

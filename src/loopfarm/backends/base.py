@@ -5,7 +5,7 @@ import sys
 from typing import IO, TYPE_CHECKING
 
 from ..summary import summarize_with_haiku
-from ..events import StreamEventSink
+from ..runtime.events import StreamEventSink
 from .stream_helpers import StreamFormatter, run_stream_backend
 
 if TYPE_CHECKING:

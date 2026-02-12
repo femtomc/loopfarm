@@ -5,7 +5,7 @@ from typing import IO, TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from ..runner import LoopfarmConfig
-    from ..events import StreamEventSink
+    from ..runtime.events import StreamEventSink
 
 
 class Backend(Protocol):

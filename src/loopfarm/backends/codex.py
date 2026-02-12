@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
-from ..events import StreamEventSink
+from ..runtime.events import StreamEventSink
 from ..format_stream import CodexJsonlFormatter
 from ..summary import extract_phase_summary_from_last_message
 from ..util import env_flag, env_int

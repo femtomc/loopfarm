@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from loopfarm.control_plane import ControlCheckpointResult
+from loopfarm.runtime.control import ControlCheckpointResult
 from loopfarm.runner import CodexPhaseModel, LoopfarmConfig, LoopfarmRunner, StopRequested
 
 

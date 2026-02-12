@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .forum_store import ForumStore
+from .stores.forum import ForumStore
 
 
 @dataclass

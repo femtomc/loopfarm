@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .forum import Forum
-from .util import CommandError, env_int, run_capture, utc_now_iso
+from ..forum import Forum
+from ..util import CommandError, env_int, run_capture, utc_now_iso
 
 
 def _truncate_lines(lines: list[str], max_lines: int) -> list[str]:

@@ -14,13 +14,13 @@ __all__ = [
 __version__ = "0.1.0"
 
 if TYPE_CHECKING:
-    from .events import LoopfarmEvent
+    from .runtime.events import LoopfarmEvent
     from .runner import LoopfarmConfig, LoopfarmIO, LoopfarmRunner, run_loop
 
 
 def __getattr__(name: str):
     if name == "LoopfarmEvent":
-        from .events import LoopfarmEvent
+        from .runtime.events import LoopfarmEvent
 
         return LoopfarmEvent
     if name in {"LoopfarmConfig", "LoopfarmIO", "LoopfarmRunner", "run_loop"}:

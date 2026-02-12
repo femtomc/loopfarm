@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
-from ..events import StreamEventSink
+from ..runtime.events import StreamEventSink
 from ..summary import extract_phase_summary_from_last_message
 from .base import StreamBackend
 from .stream_helpers import StreamFormatter, ensure_empty_last_message

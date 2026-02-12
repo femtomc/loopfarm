@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .util import utc_now_iso
+from ..util import utc_now_iso
 
 
 ControlCheckpointFn = Callable[..., None]

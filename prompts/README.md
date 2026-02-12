@@ -1,6 +1,6 @@
 # Prompts
 
-`loopfarm` runs a strict program spec from `.loopfarm/loopfarm.toml`.
+`loopfarm` runs strict program specs from `.loopfarm/loopfarm.toml` and/or `.loopfarm/programs/*.toml`.
 
 ## Program Contract
 
@@ -86,6 +86,8 @@ inject = ["forward_report"]
 
 ```bash
 loopfarm init
+loopfarm programs
+loopfarm programs list --json
 loopfarm "Implement a streaming parser"
 loopfarm --program implementation "Improve tail latency"
 loopfarm --project edge-agent "Refactor monitor API"

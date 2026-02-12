@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from collections.abc import Mapping, Sequence
+from typing import Literal
+
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+
+OUTPUT_ENV_VAR = "LOOPFARM_OUTPUT"
+OUTPUT_CHOICES = ("auto", "plain", "rich")
+OutputMode = Literal["plain", "rich"]
+
+
+def add_output_mode_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--output",
+        choices=OUTPUT_CHOICES,
+        help=(
+            "Output mode: auto (default), plain, or rich. "
+            f"Can also be set with {OUTPUT_ENV_VAR}."
+        ),
+    )
+
+
+def _normalize_choice(raw: str | None, *, source: str) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if not value:
+        return None
+    if value not in OUTPUT_CHOICES:
+        expected = ", ".join(OUTPUT_CHOICES)
+        raise ValueError(f"invalid {source} value {raw!r}; expected one of: {expected}")
+    return value
+
+
+def _stream_is_tty(stream: object) -> bool:
+    probe = getattr(stream, "isatty", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe())
+    except Exception:
+        return False
+
+
+def resolve_output_mode(
+    requested: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    is_tty: bool | None = None,
+) -> OutputMode:
+    selected = _normalize_choice(requested, source="--output")
+    if selected is None:
+        source_env = os.environ if env is None else env
+        selected = _normalize_choice(
+            source_env.get(OUTPUT_ENV_VAR), source=OUTPUT_ENV_VAR
+        )
+    if selected is None:
+        selected = "auto"
+
+    if selected == "auto":
+        tty = _stream_is_tty(sys.stdout) if is_tty is None else bool(is_tty)
+        return "rich" if tty else "plain"
+    return "rich" if selected == "rich" else "plain"
+
+
+def make_console(mode: OutputMode, *, stderr: bool = False) -> Console:
+    return Console(
+        file=sys.stderr if stderr else sys.stdout,
+        force_terminal=mode == "rich",
+        no_color=mode != "rich",
+        highlight=False,
+    )
+
+
+def render_table(
+    console: Console,
+    *,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[object]],
+    title: str | None = None,
+    no_wrap_columns: Sequence[int] = (),
+) -> None:
+    table = Table(title=title)
+    no_wrap = set(no_wrap_columns)
+    for idx, header in enumerate(headers):
+        table.add_column(str(header), no_wrap=idx in no_wrap)
+    for row in rows:
+        table.add_row(*(str(value or "") for value in row))
+    console.print(table)
+
+
+def render_panel(console: Console, body: str, *, title: str | None = None) -> None:
+    console.print(Panel(body, title=title))
+
+
+def render_markdown(console: Console, body: str) -> None:
+    console.print(Markdown(body))
+
+
+def render_rich_help(
+    *,
+    command: str,
+    summary: str,
+    usage: Sequence[str],
+    sections: Sequence[tuple[str, Sequence[tuple[str, str]]]],
+    examples: Sequence[tuple[str, str]] = (),
+    docs_tip: str | None = None,
+    stderr: bool = False,
+) -> None:
+    console = make_console("rich", stderr=stderr)
+    render_panel(console, summary, title=f"[bold blue]{command}[/bold blue]")
+    console.print()
+    console.print("[bold]Usage[/bold]")
+    for line in usage:
+        console.print(f"  {line}", markup=False)
+
+    for title, rows in sections:
+        if not rows:
+            continue
+        console.print()
+        render_table(
+            console,
+            title=title,
+            headers=("Item", "Description"),
+            rows=rows,
+            no_wrap_columns=(0,),
+        )
+
+    if examples:
+        console.print()
+        render_table(
+            console,
+            title="Examples",
+            headers=("Command", "Purpose"),
+            rows=examples,
+            no_wrap_columns=(0,),
+        )
+
+    if docs_tip:
+        console.print()
+        render_panel(console, docs_tip, title="Docs")

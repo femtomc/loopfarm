@@ -82,6 +82,42 @@ def test_issue_list_non_json_uses_table_columns(
     assert "Implement parser" in out
 
 
+def test_issue_list_rich_output_renders_table(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    issue.create("Implement parser", tags=["feature"])
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COLUMNS", "200")
+    cli.main(["issue", "list", "--output", "rich"])
+
+    out = capsys.readouterr().out
+    assert "Issues" in out
+    assert "ID" in out
+    assert "Implement" in out or "parser" in out
+
+
+def test_issue_ready_rich_output_renders_table(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    row = issue.create("Ready task")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COLUMNS", "200")
+    cli.main(["issue", "ready", "--output", "rich"])
+
+    out = capsys.readouterr().out
+    assert "Ready Issues" in out
+    assert row["id"] in out
+    assert "Ready task" in out
+
+
 def test_issue_close_reopen_and_delete(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -126,6 +162,70 @@ def test_issue_comments_subcommand(
     out = capsys.readouterr().out
     assert "reviewer" in out
     assert "Ship it" in out
+
+
+def test_issue_show_rich_output_renders_sections(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    src = issue.create("Parent")
+    dst = issue.create("Child", body="Needs docs")
+    issue.add_dep(src["id"], "blocks", dst["id"])
+    issue.add_comment(dst["id"], "Ship it", author="reviewer")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COLUMNS", "200")
+    cli.main(["issue", "show", dst["id"], "--output", "rich"])
+
+    out = capsys.readouterr().out
+    assert f"Issue {dst['id']}" in out
+    assert "Description" in out
+    assert "Dependencies" in out
+    assert "SOURCE" in out
+    assert "TARGET" in out
+    assert "Comment [" in out
+    assert "Ship it" in out
+
+
+def test_issue_comments_rich_output_renders_panels(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    row = issue.create("Needs follow-up")
+    issue.add_comment(row["id"], "Ship it", author="reviewer")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COLUMNS", "200")
+    cli.main(["issue", "comments", row["id"], "--output", "rich"])
+
+    out = capsys.readouterr().out
+    assert "reviewer" in out
+    assert "Ship it" in out
+
+
+def test_issue_deps_rich_output_renders_table(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    src = issue.create("Parent")
+    dst = issue.create("Child")
+    issue.add_dep(src["id"], "blocks", dst["id"])
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COLUMNS", "200")
+    cli.main(["issue", "deps", dst["id"], "--output", "rich"])
+
+    out = capsys.readouterr().out
+    assert f"Dependencies: {dst['id']}" in out
+    assert "SOURCE" in out
+    assert "TYPE" in out
+    assert "TARGET" in out
 
 
 def test_forum_read_empty_prints_message_and_has_no_side_effects(

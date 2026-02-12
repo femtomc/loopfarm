@@ -10,6 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from .forum import Forum
+from .ui import (
+    add_output_mode_argument,
+    make_console,
+    render_panel,
+    render_rich_help,
+    render_table,
+    resolve_output_mode,
+)
 
 _SESSION_TOPIC_RE = re.compile(r"^loopfarm:session:(?P<session_id>[^\s]+)$")
 
@@ -289,6 +297,32 @@ def _print_session_rows(rows: list[dict[str, Any]]) -> None:
         print("  ".join(row[idx].ljust(widths[idx]) for idx in range(len(headers))))
 
 
+def _print_session_rows_rich(rows: list[dict[str, Any]]) -> None:
+    console = make_console("rich")
+    if not rows:
+        render_panel(console, "(no sessions)", title="Session History")
+        return
+
+    render_table(
+        console,
+        title="Session History",
+        headers=("Session", "Status", "Phase", "Iter", "Started", "Decision", "Prompt"),
+        no_wrap_columns=(0, 1, 2, 3, 4, 5),
+        rows=[
+            (
+                str(row.get("session_id") or ""),
+                str(row.get("status") or "-"),
+                str(row.get("phase") or "-"),
+                str(row.get("iteration") or "-"),
+                str(row.get("started") or row.get("topic_created_at_iso") or "-"),
+                str(row.get("decision") or "-"),
+                str(row.get("prompt") or "-"),
+            )
+            for row in rows
+        ],
+    )
+
+
 def _print_session_detail(row: dict[str, Any]) -> None:
     print(f"session:   {row.get('session_id')}")
     print(f"status:    {row.get('status') or '-'}")
@@ -318,6 +352,118 @@ def _print_session_detail(row: dict[str, Any]) -> None:
                 print(f"  [{phase} #{iteration}] {summary}")
 
 
+def _print_session_detail_rich(row: dict[str, Any]) -> None:
+    session_id = row.get("session_id")
+    summary = "\n".join(
+        [
+            f"status: {row.get('status') or '-'}",
+            f"phase: {row.get('phase') or '-'}",
+            f"iteration: {row.get('iteration') or '-'}",
+            f"started: {row.get('started') or row.get('topic_created_at_iso') or '-'}",
+            f"ended: {row.get('ended') or '-'}",
+            f"decision: {row.get('decision') or '-'}",
+            f"summary: {row.get('decision_summary') or row.get('latest_summary') or '-'}",
+        ]
+    )
+
+    console = make_console("rich")
+    render_panel(console, summary, title=f"Session {session_id}")
+
+    prompt = str(row.get("prompt") or "").strip()
+    render_panel(console, prompt or "(no prompt)", title="Prompt")
+
+    briefings = row.get("briefings") or []
+    if briefings:
+        render_table(
+            console,
+            title="Briefings",
+            headers=("Phase", "Iteration", "Timestamp", "Summary"),
+            no_wrap_columns=(0, 1, 2),
+            rows=[
+                (
+                    item.get("phase") or "unknown",
+                    str(item.get("iteration") or "-"),
+                    _iso_from_epoch_ms(item.get("created_at")) or "-",
+                    str(item.get("summary") or ""),
+                )
+                for item in briefings
+            ],
+        )
+    else:
+        render_panel(console, "(none)", title="Briefings")
+
+
+def _print_help_rich(*, prog: str) -> None:
+    alias_note = (
+        "history is an alias of `sessions list/show`."
+        if prog == "loopfarm history"
+        else "use `loopfarm history` as a shorthand alias."
+    )
+    render_rich_help(
+        command=prog,
+        summary="inspect loop session history, status decisions, and briefings",
+        usage=(
+            f"{prog} list [--status STATUS] [--limit N]",
+            f"{prog} show <session-id> [--briefings N]",
+        ),
+        sections=(
+            (
+                "Commands",
+                (
+                    ("list", "list recent sessions"),
+                    ("show <session-id>", "show one session with prompt + briefings"),
+                ),
+            ),
+            (
+                "Options",
+                (
+                    ("--json", "emit machine-stable JSON payloads"),
+                    ("--status <value>", "filter `list` by session status"),
+                    ("--limit <n>", "cap rows for `list`"),
+                    ("--briefings <n>", "limit briefing entries for `show`"),
+                    (
+                        "--output MODE",
+                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                    ),
+                    ("-h, --help", "show this help"),
+                ),
+            ),
+            (
+                "Quick Start",
+                (
+                    ("list active sessions", f"{prog} list --status running"),
+                    ("inspect detail", f"{prog} show <session-id>"),
+                    ("agent-friendly payload", f"{prog} show <session-id> --json"),
+                ),
+            ),
+            (
+                "Context",
+                (
+                    ("session fields", "status, phase, iteration, decision, summary"),
+                    (
+                        "briefings",
+                        "phase-level summaries posted during each loop iteration",
+                    ),
+                    ("alias", alias_note),
+                ),
+            ),
+        ),
+        examples=(
+            (
+                f"{prog} list --limit 10",
+                "get the most recent 10 sessions",
+            ),
+            (
+                f"{prog} show abc123 --briefings 20",
+                "inspect complete context for one session",
+            ),
+        ),
+        docs_tip=(
+            "Need execution semantics? Run `loopfarm docs show implementation-state-machine`."
+        ),
+    )
+
+
 def _build_parser(*, prog: str = "loopfarm sessions") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -329,6 +475,7 @@ def _build_parser(*, prog: str = "loopfarm sessions") -> argparse.ArgumentParser
     ls.add_argument("--status", help="Filter by session status")
     ls.add_argument("--limit", type=int, default=20, help="Max rows (default: 20)")
     ls.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(ls)
 
     show = sub.add_parser("show", help="Show one session")
     show.add_argument("id", help="Session id")
@@ -339,13 +486,35 @@ def _build_parser(*, prog: str = "loopfarm sessions") -> argparse.ArgumentParser
         help="Number of recent briefings to include (default: 8)",
     )
     show.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(show)
 
     return parser
 
 
 def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> None:
-    args = _build_parser(prog=prog).parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv in (["-h"], ["--help"]):
+        try:
+            help_output_mode = resolve_output_mode(
+                is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        if help_output_mode == "rich":
+            _print_help_rich(prog=prog)
+            raise SystemExit(0)
+
+    args = _build_parser(prog=prog).parse_args(raw_argv)
     sessions = Sessions.from_workdir(Path.cwd())
+
+    output_mode = "plain"
+    if hasattr(args, "output"):
+        try:
+            output_mode = resolve_output_mode(getattr(args, "output", None))
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2)
 
     if args.command == "list":
         rows = sessions.list(
@@ -355,10 +524,13 @@ def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> N
         if args.json:
             _emit_json(rows)
         else:
-            if not rows:
-                print("(no sessions)")
+            if output_mode == "rich":
+                _print_session_rows_rich(rows)
             else:
-                _print_session_rows(rows)
+                if not rows:
+                    print("(no sessions)")
+                else:
+                    _print_session_rows(rows)
         return
 
     if args.command == "show":
@@ -369,7 +541,10 @@ def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> N
         if args.json:
             _emit_json(row)
         else:
-            _print_session_detail(row)
+            if output_mode == "rich":
+                _print_session_detail_rich(row)
+            else:
+                _print_session_detail(row)
         return
 
 

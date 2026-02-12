@@ -9,6 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from .stores.forum import ForumStore
+from .ui import (
+    add_output_mode_argument,
+    make_console,
+    render_panel,
+    render_rich_help,
+    render_table,
+    resolve_output_mode,
+)
 
 
 @dataclass
@@ -124,6 +132,25 @@ def _print_messages(messages: list[dict[str, Any]]) -> None:
         print()
 
 
+def _print_messages_rich(messages: list[dict[str, Any]]) -> None:
+    console = make_console("rich")
+    if not messages:
+        render_panel(console, "(no messages)", title="Forum")
+        return
+
+    for item in messages:
+        msg_id = item.get("id")
+        topic = item.get("topic")
+        created = _format_time(item.get("created_at"))
+        author = item.get("author") or "unknown"
+        body = str(item.get("body") or "").rstrip() or "(empty)"
+        render_panel(
+            console,
+            body,
+            title=f"[{msg_id}] {topic} @{created} by {author}",
+        )
+
+
 def _print_topics(rows: list[dict[str, Any]]) -> None:
     headers = ("TOPIC", "CREATED", "UPDATED", "COUNT")
     values: list[tuple[str, str, str, str]] = []
@@ -148,6 +175,102 @@ def _print_topics(rows: list[dict[str, Any]]) -> None:
         print("  ".join(row[idx].ljust(widths[idx]) for idx in range(len(headers))))
 
 
+def _print_topics_rich(rows: list[dict[str, Any]]) -> None:
+    console = make_console("rich")
+    if not rows:
+        render_panel(console, "(no topics)", title="Topics")
+        return
+
+    render_table(
+        console,
+        title="Forum Topics",
+        headers=("Topic", "Created", "Updated", "Count"),
+        no_wrap_columns=(0, 1, 2, 3),
+        rows=[
+            (
+                str(row.get("name") or ""),
+                _format_time(row.get("created_at")),
+                _format_time(row.get("updated_at")),
+                str(row.get("message_count") or 0),
+            )
+            for row in rows
+        ],
+    )
+
+
+def _print_help_rich() -> None:
+    render_rich_help(
+        command="loopfarm forum",
+        summary="async message bus for loopfarm sessions and agent notes",
+        usage=("loopfarm forum <command> [ARGS]",),
+        sections=(
+            (
+                "Commands",
+                (
+                    ("post <topic> -m \"...\"", "post a message"),
+                    ("read <topic>", "read messages in chronological order"),
+                    ("show <id>", "show one message by numeric id"),
+                    ("search <query>", "full-text search across forum messages"),
+                    ("topic list", "list known topics"),
+                    ("topic new <name>", "ensure topic exists"),
+                ),
+            ),
+            (
+                "Topic Patterns",
+                (
+                    ("issue:<id>", "per-issue implementation notes"),
+                    ("loopfarm:status:<session>", "session status/decision payloads"),
+                    ("loopfarm:briefing:<session>", "phase briefing payloads"),
+                    ("research:<project>:<topic>", "research findings"),
+                ),
+            ),
+            (
+                "Options",
+                (
+                    ("--json", "emit machine-readable payloads"),
+                    (
+                        "--output MODE",
+                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                    ),
+                    ("--author <name>", "override author label for post"),
+                    ("--limit <n>", "cap read/search/topic rows"),
+                    ("-h, --help", "show this help"),
+                ),
+            ),
+            (
+                "Quick Start",
+                (
+                    (
+                        "post progress",
+                        "loopfarm forum post issue:<id> -m \"Implemented parser changes\"",
+                    ),
+                    (
+                        "read thread",
+                        "loopfarm forum read issue:<id> --limit 10",
+                    ),
+                    (
+                        "search history",
+                        "loopfarm forum search \"state machine\" --limit 20",
+                    ),
+                ),
+            ),
+        ),
+        examples=(
+            (
+                "loopfarm forum post loopfarm:status:abc123 -m '{\"decision\":\"CONTINUE\"}'",
+                "store structured status records",
+            ),
+            (
+                "loopfarm forum read loopfarm:briefing:abc123 --json",
+                "fetch briefing payloads for agent context",
+            ),
+        ),
+        docs_tip=(
+            "For end-to-end workflow context, run `loopfarm docs show source-layout`."
+        ),
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="loopfarm forum",
@@ -165,16 +288,19 @@ def _build_parser() -> argparse.ArgumentParser:
     read.add_argument("topic", help="Topic name")
     read.add_argument("--limit", type=int, default=25, help="Max rows (default: 25)")
     read.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(read)
 
     show = sub.add_parser("show", help="Show a message by ID")
     show.add_argument("id", type=int, help="Message id")
     show.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(show)
 
     search = sub.add_parser("search", help="Search forum messages")
     search.add_argument("query", help="Search text")
     search.add_argument("--topic", help="Restrict to one topic")
     search.add_argument("--limit", type=int, default=20, help="Max rows (default: 20)")
     search.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(search)
 
     topic = sub.add_parser("topic", help="Topic operations")
     topic_sub = topic.add_subparsers(dest="topic_cmd", required=True, metavar="topic_cmd")
@@ -182,6 +308,7 @@ def _build_parser() -> argparse.ArgumentParser:
     topic_list = topic_sub.add_parser("list", help="List topics")
     topic_list.add_argument("--limit", type=int, help="Max rows")
     topic_list.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(topic_list)
 
     topic_new = topic_sub.add_parser("new", help="Create topic if missing")
     topic_new.add_argument("name", help="Topic name")
@@ -191,7 +318,28 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv in (["-h"], ["--help"]):
+        try:
+            help_output_mode = resolve_output_mode(
+                is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        if help_output_mode == "rich":
+            _print_help_rich()
+            raise SystemExit(0)
+
+    args = _build_parser().parse_args(raw_argv)
+
+    output_mode = "plain"
+    if hasattr(args, "output"):
+        try:
+            output_mode = resolve_output_mode(getattr(args, "output", None))
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2)
 
     create = False
     if args.command == "post":
@@ -214,10 +362,13 @@ def main(argv: list[str] | None = None) -> None:
             if args.json:
                 _emit_json(rows)
             else:
-                if not rows:
-                    print("(no messages)")
+                if output_mode == "rich":
+                    _print_messages_rich(rows)
                 else:
-                    _print_messages(rows)
+                    if not rows:
+                        print("(no messages)")
+                    else:
+                        _print_messages(rows)
             return
 
         if args.command == "show":
@@ -228,7 +379,10 @@ def main(argv: list[str] | None = None) -> None:
             if args.json:
                 _emit_json(row)
             else:
-                _print_messages([row])
+                if output_mode == "rich":
+                    _print_messages_rich([row])
+                else:
+                    _print_messages([row])
             return
 
         if args.command == "search":
@@ -240,10 +394,13 @@ def main(argv: list[str] | None = None) -> None:
             if args.json:
                 _emit_json(rows)
             else:
-                if not rows:
-                    print("(no results)")
+                if output_mode == "rich":
+                    _print_messages_rich(rows)
                 else:
-                    _print_messages(rows)
+                    if not rows:
+                        print("(no results)")
+                    else:
+                        _print_messages(rows)
             return
 
         if args.command == "topic":
@@ -252,10 +409,13 @@ def main(argv: list[str] | None = None) -> None:
                 if args.json:
                     _emit_json(rows)
                 else:
-                    if not rows:
-                        print("(no topics)")
+                    if output_mode == "rich":
+                        _print_topics_rich(rows)
                     else:
-                        _print_topics(rows)
+                        if not rows:
+                            print("(no topics)")
+                        else:
+                            _print_topics(rows)
                 return
 
             if args.topic_cmd == "new":

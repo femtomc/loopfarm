@@ -9,8 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from .stores.issue import ISSUE_STATUSES, RELATION_TYPES, IssueStore
+from .ui import (
+    add_output_mode_argument,
+    make_console,
+    render_panel,
+    render_rich_help,
+    render_table,
+    resolve_output_mode,
+)
 
 _RELATION_CHOICES = tuple(RELATION_TYPES) + ("blocked_by", "child")
+_ISSUE_HEADERS = ("ID", "STATUS", "PR", "UPDATED", "TITLE", "TAGS")
+_DEPENDENCY_HEADERS = ("SOURCE", "TYPE", "TARGET", "DIR", "ACTIVE", "CREATED")
 
 
 @dataclass
@@ -192,18 +202,34 @@ def _print_issue(issue: dict[str, Any]) -> None:
 
 
 def _print_issue_table(rows: list[dict[str, Any]]) -> None:
-    headers = ("ID", "STATUS", "PR", "UPDATED", "TITLE", "TAGS")
     values = [_issue_columns(row) for row in rows]
 
-    widths = [len(item) for item in headers]
+    widths = [len(item) for item in _ISSUE_HEADERS]
     for row in values:
         for idx, col in enumerate(row):
             widths[idx] = max(widths[idx], len(col))
 
-    print("  ".join(headers[idx].ljust(widths[idx]) for idx in range(len(headers))))
-    print("  ".join("-" * widths[idx] for idx in range(len(headers))))
+    print(
+        "  ".join(
+            _ISSUE_HEADERS[idx].ljust(widths[idx]) for idx in range(len(_ISSUE_HEADERS))
+        )
+    )
+    print("  ".join("-" * widths[idx] for idx in range(len(_ISSUE_HEADERS))))
     for row in values:
-        print("  ".join(row[idx].ljust(widths[idx]) for idx in range(len(headers))))
+        print(
+            "  ".join(row[idx].ljust(widths[idx]) for idx in range(len(_ISSUE_HEADERS)))
+        )
+
+
+def _print_issue_table_rich(rows: list[dict[str, Any]], *, title: str) -> None:
+    console = make_console("rich")
+    render_table(
+        console,
+        title=title,
+        headers=_ISSUE_HEADERS,
+        no_wrap_columns=(0, 1, 2, 3, 5),
+        rows=[_issue_columns(row) for row in rows],
+    )
 
 
 def _print_issue_details(issue: dict[str, Any]) -> None:
@@ -245,6 +271,101 @@ def _print_issue_details(issue: dict[str, Any]) -> None:
             print(f"  {comment.get('body')}")
 
 
+def _dependency_columns(row: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    active = "active" if row.get("active") else "inactive"
+    return (
+        str(row.get("src_id") or ""),
+        str(row.get("type") or ""),
+        str(row.get("dst_id") or ""),
+        str(row.get("direction") or "?"),
+        active,
+        _format_time(row.get("created_at")),
+    )
+
+
+def _print_dependencies_rich(
+    rows: list[dict[str, Any]],
+    *,
+    title: str,
+    no_rows_message: str,
+) -> None:
+    console = make_console("rich")
+    if not rows:
+        render_panel(console, no_rows_message, title=title)
+        return
+    render_table(
+        console,
+        title=title,
+        headers=_DEPENDENCY_HEADERS,
+        no_wrap_columns=(0, 1, 2, 3, 4, 5),
+        rows=[_dependency_columns(row) for row in rows],
+    )
+
+
+def _print_comments_rich(
+    rows: list[dict[str, Any]], *, title: str = "Comments"
+) -> None:
+    console = make_console("rich")
+    if not rows:
+        render_panel(console, "(no comments)", title=title)
+        return
+    for row in rows:
+        comment_id = row.get("id")
+        author = row.get("author") or "unknown"
+        created = _format_time(row.get("created_at"))
+        body = str(row.get("body") or "").rstrip() or "(empty)"
+        render_panel(console, body, title=f"[{comment_id}] {author} @ {created}")
+
+
+def _print_issue_details_rich(issue: dict[str, Any]) -> None:
+    issue_id = str(issue.get("id") or "")
+    priority = issue.get("priority")
+    priority_label = f"P{priority}" if priority is not None else "-"
+    tags = ", ".join(str(tag) for tag in issue.get("tags") or []) or "-"
+    summary = "\n".join(
+        [
+            f"status: {issue.get('status') or '-'}",
+            f"priority: {priority_label}",
+            f"created: {_format_time(issue.get('created_at'))}",
+            f"updated: {_format_time(issue.get('updated_at'))}",
+            f"tags: {tags}",
+        ]
+    )
+
+    console = make_console("rich")
+    render_panel(console, summary, title=f"Issue {issue_id}")
+
+    body = str(issue.get("body") or "").strip()
+    render_panel(console, body or "(no description)", title="Description")
+
+    dependencies = issue.get("dependencies") or []
+    if dependencies:
+        render_table(
+            console,
+            title="Dependencies",
+            headers=_DEPENDENCY_HEADERS,
+            no_wrap_columns=(0, 1, 2, 3, 4, 5),
+            rows=[_dependency_columns(dep) for dep in dependencies],
+        )
+    else:
+        render_panel(console, "(none)", title="Dependencies")
+
+    comments = issue.get("comments") or []
+    if comments:
+        for comment in comments:
+            comment_id = comment.get("id")
+            author = comment.get("author") or "unknown"
+            created = _format_time(comment.get("created_at"))
+            body_text = str(comment.get("body") or "").rstrip() or "(empty)"
+            render_panel(
+                console,
+                body_text,
+                title=f"Comment [{comment_id}] {author} @ {created}",
+            )
+    else:
+        render_panel(console, "(none)", title="Comments")
+
+
 def _print_comments(rows: list[dict[str, Any]]) -> None:
     for row in rows:
         comment_id = row.get("id")
@@ -253,6 +374,75 @@ def _print_comments(rows: list[dict[str, Any]]) -> None:
         print(f"[{comment_id}] {author} @ {created}")
         print(str(row.get("body") or ""))
         print()
+
+
+def _print_help_rich() -> None:
+    render_rich_help(
+        command="loopfarm issue",
+        summary="issue tracker for loop-driven execution",
+        usage=("loopfarm issue <command> [ARGS]",),
+        sections=(
+            (
+                "Commands",
+                (
+                    ("list", "list issues with status/search/tag filters"),
+                    ("ready", "show ready-to-work leaf issues"),
+                    ("show <id>", "show issue details, dependencies, comments"),
+                    ("comments <id>", "list comments for one issue"),
+                    ("new <title>", "create issue with optional body/tags"),
+                    ("status <id> <value>", "set issue status"),
+                    ("close <id...>", "set one or more issues to closed"),
+                    ("reopen <id...>", "set one or more issues to open"),
+                    ("priority <id> <1-5>", "set issue priority"),
+                    ("edit <id> [flags]", "update title/body/status/priority"),
+                    ("comment <id> -m \"...\"", "add a comment"),
+                    ("deps <id>", "show dependency relations around an issue"),
+                    ("dep add <src> <type> <dst>", "create dependency relation"),
+                    ("tag add/remove <id> <tag>", "manage issue tags"),
+                    ("delete <id...> --yes", "delete issue(s)"),
+                ),
+            ),
+            (
+                "Options",
+                (
+                    ("--json", "emit machine-stable JSON payloads"),
+                    (
+                        "--output MODE",
+                        "auto|plain|rich for read commands (or LOOPFARM_OUTPUT)",
+                    ),
+                    ("-h, --help", "show this help"),
+                ),
+            ),
+            (
+                "Quick Start",
+                (
+                    ("pick next item", "loopfarm issue ready"),
+                    ("inspect", "loopfarm issue show <id>"),
+                    ("start work", "loopfarm issue status <id> in_progress"),
+                    ("record progress", "loopfarm issue comment <id> -m \"...\""),
+                    ("close", "loopfarm issue status <id> closed"),
+                ),
+            ),
+        ),
+        examples=(
+            (
+                "loopfarm issue list --status open --tag cli --output rich",
+                "triage all open CLI work",
+            ),
+            (
+                "loopfarm issue dep add loopfarm-a blocks loopfarm-b",
+                "encode execution order",
+            ),
+            (
+                "loopfarm issue show loopfarm-a --json",
+                "export structured issue context for agents",
+            ),
+        ),
+        docs_tip=(
+            "Need loop semantics context? Try `loopfarm docs show steps-grammar` "
+            "and `loopfarm docs show implementation-state-machine`."
+        ),
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -268,19 +458,25 @@ def _build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--tag", help="Filter by tag")
     ls.add_argument("--limit", type=int, default=50, help="Max rows (default: 50)")
     ls.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(ls)
 
     ready = sub.add_parser("ready", help="List ready-to-work issues")
     ready.add_argument("--limit", type=int, default=20, help="Max rows (default: 20)")
     ready.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(ready)
 
     show = sub.add_parser("show", help="Show one issue with details")
     show.add_argument("id", help="Issue id")
     show.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(show)
 
     comments = sub.add_parser("comments", help="List comments for an issue")
     comments.add_argument("id", help="Issue id")
-    comments.add_argument("--limit", type=int, default=25, help="Max rows (default: 25)")
+    comments.add_argument(
+        "--limit", type=int, default=25, help="Max rows (default: 25)"
+    )
     comments.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(comments)
 
     new = sub.add_parser("new", help="Create a new issue")
     new.add_argument("title", help="Issue title")
@@ -293,7 +489,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Initial status ({', '.join(ISSUE_STATUSES)})",
     )
     new.add_argument("-p", "--priority", type=int, default=3, help="Priority 1-5")
-    new.add_argument("-t", "--tag", action="append", default=[], help="Tag (repeatable)")
+    new.add_argument(
+        "-t", "--tag", action="append", default=[], help="Tag (repeatable)"
+    )
     new.add_argument("--json", action="store_true", help="Output JSON")
 
     status = sub.add_parser("status", help="Set issue status")
@@ -344,6 +542,7 @@ def _build_parser() -> argparse.ArgumentParser:
     deps = sub.add_parser("deps", help="List dependencies connected to an issue")
     deps.add_argument("id", help="Issue id")
     deps.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(deps)
 
     dep = sub.add_parser("dep", help="Dependency operations")
     dep_sub = dep.add_subparsers(dest="dep_cmd", required=True, metavar="dep_cmd")
@@ -372,10 +571,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv in (["-h"], ["--help"]):
+        try:
+            help_output_mode = resolve_output_mode(
+                is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        if help_output_mode == "rich":
+            _print_help_rich()
+            raise SystemExit(0)
+
+    args = _build_parser().parse_args(raw_argv)
 
     create = args.command not in {"list", "ready", "show", "deps", "comments"}
     issue = Issue.from_workdir(Path.cwd(), create=create)
+    output_mode = "plain"
+    if hasattr(args, "output"):
+        try:
+            output_mode = resolve_output_mode(getattr(args, "output", None))
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2)
 
     try:
         if args.command == "list":
@@ -390,9 +609,23 @@ def main(argv: list[str] | None = None) -> None:
             else:
                 if not rows:
                     if args.status or args.search or args.tag:
-                        print("(no matching issues)")
+                        if output_mode == "rich":
+                            render_panel(
+                                make_console("rich"),
+                                "(no matching issues)",
+                                title="Issues",
+                            )
+                        else:
+                            print("(no matching issues)")
                     else:
-                        print("(no issues)")
+                        if output_mode == "rich":
+                            render_panel(
+                                make_console("rich"), "(no issues)", title="Issues"
+                            )
+                        else:
+                            print("(no issues)")
+                elif output_mode == "rich":
+                    _print_issue_table_rich(rows, title="Issues")
                 else:
                     _print_issue_table(rows)
             return
@@ -403,7 +636,16 @@ def main(argv: list[str] | None = None) -> None:
                 _emit_json(rows)
             else:
                 if not rows:
-                    print("(no ready issues)")
+                    if output_mode == "rich":
+                        render_panel(
+                            make_console("rich"),
+                            "(no ready issues)",
+                            title="Ready Issues",
+                        )
+                    else:
+                        print("(no ready issues)")
+                elif output_mode == "rich":
+                    _print_issue_table_rich(rows, title="Ready Issues")
                 else:
                     _print_issue_table(rows)
             return
@@ -415,6 +657,8 @@ def main(argv: list[str] | None = None) -> None:
                 raise SystemExit(1)
             if args.json:
                 _emit_json(row)
+            elif output_mode == "rich":
+                _print_issue_details_rich(row)
             else:
                 _print_issue_details(row)
             return
@@ -425,7 +669,12 @@ def main(argv: list[str] | None = None) -> None:
                 _emit_json(rows)
             else:
                 if not rows:
-                    print("(no comments)")
+                    if output_mode == "rich":
+                        _print_comments_rich(rows)
+                    else:
+                        print("(no comments)")
+                elif output_mode == "rich":
+                    _print_comments_rich(rows)
                 else:
                     _print_comments(rows)
             return
@@ -517,13 +766,20 @@ def main(argv: list[str] | None = None) -> None:
             if args.json:
                 _emit_json(rows)
             else:
-                if not rows:
-                    print("(no dependencies)")
-                for row in rows:
-                    print(
-                        f"{row['src_id']} {row['type']} {row['dst_id']}\t"
-                        f"active={row['active']}"
+                if output_mode == "rich":
+                    _print_dependencies_rich(
+                        rows,
+                        title=f"Dependencies: {args.id}",
+                        no_rows_message="(no dependencies)",
                     )
+                else:
+                    if not rows:
+                        print("(no dependencies)")
+                    for row in rows:
+                        print(
+                            f"{row['src_id']} {row['type']} {row['dst_id']}\t"
+                            f"active={row['active']}"
+                        )
             return
 
         if args.command == "dep" and args.dep_cmd == "add":

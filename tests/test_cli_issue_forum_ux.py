@@ -251,3 +251,18 @@ def test_sessions_and_history_commands_show_session_data(
     assert payload["status"] == "running"
     assert payload["decision"] == "CONTINUE"
     assert len(payload["briefings"]) == 1
+
+
+def test_history_help_uses_history_prog_name(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["history", "--help"])
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 0
+    assert "usage: loopfarm history" in (captured.out + captured.err)

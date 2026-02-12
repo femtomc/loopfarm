@@ -318,9 +318,9 @@ def _print_session_detail(row: dict[str, Any]) -> None:
                 print(f"  [{phase} #{iteration}] {summary}")
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(*, prog: str = "loopfarm sessions") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="loopfarm sessions",
+        prog=prog,
         description="List and inspect loopfarm session history.",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -343,8 +343,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
+def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> None:
+    args = _build_parser(prog=prog).parse_args(argv)
     sessions = Sessions.from_workdir(Path.cwd())
 
     if args.command == "list":

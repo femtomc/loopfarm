@@ -110,6 +110,23 @@ def _resolve_phase_overrides(
                 file=sys.stderr,
             )
             raise SystemExit(2)
+
+        phase_cli = (phase_cfg.cli or "").strip()
+        if not phase_cli:
+            print(
+                f"error: missing cli for phase {phase!r} in [program.phase.{phase}]",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+
+        phase_model = (phase_cfg.model or "").strip()
+        if phase_cli != "kimi" and not phase_model:
+            print(
+                f"error: missing model for phase {phase!r} in [program.phase.{phase}]",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+
         prompt_file = Path(prompt_path)
         if not prompt_file.is_absolute():
             prompt_file = repo_root / prompt_file
@@ -120,26 +137,10 @@ def _resolve_phase_overrides(
             )
             raise SystemExit(2)
         phase_prompt_overrides.append((phase, prompt_path))
-
-        phase_cli = (phase_cfg.cli or "").strip()
-        if not phase_cli:
-            print(
-                f"error: missing cli for phase {phase!r} in [program.phase.{phase}]",
-                file=sys.stderr,
-            )
-            raise SystemExit(2)
         phase_cli_overrides.append((phase, phase_cli))
 
         if phase_cfg.inject:
             phase_injections.append((phase, phase_cfg.inject))
-
-        phase_model = (phase_cfg.model or "").strip()
-        if phase_cli != "kimi" and not phase_model:
-            print(
-                f"error: missing model for phase {phase!r} in [program.phase.{phase}]",
-                file=sys.stderr,
-            )
-            raise SystemExit(2)
 
         if phase_model:
             reasoning = (phase_cfg.reasoning or "xhigh").strip() or "xhigh"
@@ -182,15 +183,18 @@ def main(argv: list[str] | None = None) -> None:
         if command == "sessions":
             from .sessions import main as sessions_main
 
-            sessions_main(sub_argv or ["list"])
+            sessions_main(sub_argv or ["list"], prog="loopfarm sessions")
             return
         if command == "history":
             from .sessions import main as sessions_main
 
+            if sub_argv and sub_argv[0] in {"-h", "--help"}:
+                sessions_main(["--help"], prog="loopfarm history")
+                return
             if sub_argv and sub_argv[0] in {"list", "show"}:
-                sessions_main(sub_argv)
+                sessions_main(sub_argv, prog="loopfarm history")
             else:
-                sessions_main(["list", *sub_argv])
+                sessions_main(["list", *sub_argv], prog="loopfarm history")
             return
 
     args = _build_parser().parse_args(raw_argv)

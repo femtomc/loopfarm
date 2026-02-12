@@ -236,6 +236,40 @@ model = "gpt-5.2"
     assert raised.value.code == 2
 
 
+def test_main_reports_missing_cli_before_prompt_file_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_program(
+        tmp_path,
+        body="""
+[program]
+name = "impl"
+steps = ["forward", "backward"]
+termination_phase = "backward"
+
+[program.phase.forward]
+prompt = "missing-forward.md"
+model = "gpt-5.3-codex"
+
+[program.phase.backward]
+cli = "codex"
+prompt = "missing-backward.md"
+model = "gpt-5.2"
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["Implement feature"])
+
+    stderr = capsys.readouterr().err
+    assert raised.value.code == 2
+    assert "missing cli for phase 'forward'" in stderr
+    assert "prompt file not found" not in stderr
+
+
 def test_main_rejects_missing_model_for_non_kimi_phase(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -263,6 +297,40 @@ model = "gpt-5.2"
         cli.main(["Implement feature"])
 
     assert raised.value.code == 2
+
+
+def test_main_reports_missing_model_before_prompt_file_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_program(
+        tmp_path,
+        body="""
+[program]
+name = "impl"
+steps = ["forward", "backward"]
+termination_phase = "backward"
+
+[program.phase.forward]
+cli = "codex"
+prompt = "missing-forward.md"
+
+[program.phase.backward]
+cli = "codex"
+prompt = "missing-backward.md"
+model = "gpt-5.2"
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["Implement feature"])
+
+    stderr = capsys.readouterr().err
+    assert raised.value.code == 2
+    assert "missing model for phase 'forward'" in stderr
+    assert "prompt file not found" not in stderr
 
 
 def test_main_allows_kimi_phase_without_model(

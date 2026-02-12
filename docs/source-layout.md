@@ -8,7 +8,6 @@ src/loopfarm/
 ├── runner.py              # loop runtime facade
 ├── issue.py               # issue command + service facade
 ├── forum.py               # forum command + service facade
-├── monitor.py             # monitoring server/frontend
 ├── init_cmd.py            # scaffold command
 ├── backends/              # model backend adapters (codex/claude/gemini/kimi)
 ├── runtime/               # orchestration internals

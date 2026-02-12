@@ -24,7 +24,6 @@ def _print_help() -> None:
     console.print("  forum     post/read/search loopfarm forum topics/messages")
     console.print("  sessions  list/show recent loop sessions and summaries")
     console.print("  history   alias for `sessions list`")
-    console.print("  monitor   start the local monitor web UI and API server")
     console.print()
     console.print("[bold]Required Config[/bold]")
     console.print("  .loopfarm/loopfarm.toml with a strict [program] block", markup=False)
@@ -174,11 +173,6 @@ def main(argv: list[str] | None = None) -> None:
             from .issue import main as issue_main
 
             issue_main(sub_argv)
-            return
-        if command == "monitor":
-            from .monitor import main as monitor_main
-
-            monitor_main(sub_argv)
             return
         if command == "sessions":
             from .sessions import main as sessions_main

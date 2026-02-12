@@ -21,6 +21,7 @@ def test_init_creates_scaffold(monkeypatch, tmp_path: Path) -> None:
     assert "[program]" in text
     assert f'project = "{tmp_path.name}"' in text
     assert "steps = [\"forward*5\", \"documentation\", \"architecture\", \"backward\"]" in text
+    assert ".loopfarm/programs/" in text
 
 
 def test_init_skips_existing_files_without_force(monkeypatch, tmp_path: Path) -> None:

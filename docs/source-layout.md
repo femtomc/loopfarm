@@ -11,7 +11,7 @@ src/loopfarm/
 ├── init_cmd.py            # scaffold command
 ├── backends/              # model backend adapters (codex/claude/gemini/kimi)
 ├── runtime/               # orchestration internals
-│   ├── config.py          # .loopfarm/loopfarm.toml parsing
+│   ├── config.py          # program discovery from .loopfarm/loopfarm.toml + .loopfarm/programs/*.toml
 │   ├── control.py         # pause/resume/stop control-plane logic
 │   ├── events.py          # event datatypes
 │   ├── forward_report.py  # forward-pass diff/report capture
@@ -27,3 +27,8 @@ src/loopfarm/
 
 This keeps top-level modules focused on user-facing commands while grouping
 runtime internals and persistence logic in dedicated packages.
+
+Program config layout:
+
+- Legacy single-program config: `.loopfarm/loopfarm.toml`
+- Multi-program config directory: `.loopfarm/programs/*.toml` (one strict `[program]` block per file)

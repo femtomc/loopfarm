@@ -12,9 +12,17 @@ def _write_program(
     *,
     body: str,
 ) -> None:
-    path = tmp_path / ".loopfarm" / "loopfarm.toml"
+    _write_program_file(tmp_path, ".loopfarm/loopfarm.toml", body=body)
+
+
+def _write_program_file(tmp_path: Path, rel_path: str, *, body: str) -> None:
+    path = tmp_path / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.strip() + "\n", encoding="utf-8")
+
+
+def _write_program_in_dir(tmp_path: Path, name: str, *, body: str) -> None:
+    _write_program_file(tmp_path, f".loopfarm/programs/{name}.toml", body=body)
 
 
 def _write_prompt(tmp_path: Path, rel_path: str) -> None:
@@ -23,11 +31,11 @@ def _write_prompt(tmp_path: Path, rel_path: str) -> None:
     path.write_text("Prompt\n", encoding="utf-8")
 
 
-def _minimal_program_toml() -> str:
-    return """
+def _minimal_program_toml(*, name: str = "impl", project: str = "alpha") -> str:
+    return f"""
 [program]
-name = "impl"
-project = "alpha"
+name = "{name}"
+project = "{project}"
 steps = ["planning", "forward*2", "backward"]
 termination_phase = "backward"
 report_source_phase = "forward"
@@ -67,7 +75,9 @@ def test_main_requires_program_config(
 
     stderr = capsys.readouterr().err
     assert raised.value.code == 2
-    assert "error: config file not found: .loopfarm/loopfarm.toml" in stderr
+    assert "error: no program config found" in stderr
+    assert ".loopfarm/loopfarm.toml" in stderr
+    assert ".loopfarm/programs/*.toml" in stderr
 
 
 def test_main_builds_cfg_from_program(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -137,7 +147,9 @@ def test_main_project_flag_overrides_program_project(
 
 
 def test_main_rejects_program_name_mismatch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_program(tmp_path, body=_minimal_program_toml())
     monkeypatch.chdir(tmp_path)
@@ -145,7 +157,95 @@ def test_main_rejects_program_name_mismatch(
     with pytest.raises(SystemExit) as raised:
         cli.main(["--program", "other", "Implement feature"])
 
+    stderr = capsys.readouterr().err
     assert raised.value.code == 2
+    assert "error: program 'other' not found" in stderr
+    assert "available: 'impl'" in stderr
+
+
+def test_main_requires_program_flag_when_multiple_programs_available(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_program_in_dir(
+        tmp_path,
+        "zeta",
+        body=_minimal_program_toml(name="zeta", project="zeta-project"),
+    )
+    _write_program_in_dir(
+        tmp_path,
+        "alpha",
+        body=_minimal_program_toml(name="alpha", project="alpha-project"),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["Implement feature"])
+
+    stderr = capsys.readouterr().err
+    assert raised.value.code == 2
+    assert "multiple programs available; pass --program NAME" in stderr
+    assert "available: 'alpha', 'zeta'" in stderr
+
+
+def test_main_selects_requested_program_from_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured = {}
+
+    def fake_run_loop(cfg):
+        captured["cfg"] = cfg
+        return 0
+
+    _write_program_in_dir(
+        tmp_path,
+        "alpha",
+        body=_minimal_program_toml(name="alpha", project="alpha-project"),
+    )
+    _write_program_in_dir(
+        tmp_path,
+        "zeta",
+        body=_minimal_program_toml(name="zeta", project="zeta-project"),
+    )
+    _write_prompt(tmp_path, ".loopfarm/prompts/planning.md")
+    _write_prompt(tmp_path, ".loopfarm/prompts/forward.md")
+    _write_prompt(tmp_path, ".loopfarm/prompts/backward.md")
+    monkeypatch.setattr(cli, "run_loop", fake_run_loop)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--program", "zeta", "Implement feature"])
+
+    assert raised.value.code == 0
+    assert captured["cfg"].project == "zeta-project"
+
+
+def test_main_rejects_unknown_program_from_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_program_in_dir(
+        tmp_path,
+        "alpha",
+        body=_minimal_program_toml(name="alpha"),
+    )
+    _write_program_in_dir(
+        tmp_path,
+        "zeta",
+        body=_minimal_program_toml(name="zeta"),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--program", "other", "Implement feature"])
+
+    stderr = capsys.readouterr().err
+    assert raised.value.code == 2
+    assert "error: program 'other' not found" in stderr
+    assert "available: 'alpha', 'zeta'" in stderr
 
 
 def test_main_rejects_missing_program_phase_section(
@@ -390,6 +490,15 @@ def test_main_without_args_shows_help_and_exits_zero(capsys: pytest.CaptureFixtu
     assert raised.value.code == 0
     stderr = capsys.readouterr().err
     assert "usage:" in stderr.lower()
+
+
+def test_main_help_mentions_programs_directory(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--help"])
+
+    assert raised.value.code == 0
+    stderr = capsys.readouterr().err
+    assert ".loopfarm/programs/*.toml" in stderr
 
 
 def test_main_rejects_missing_prompt_file(

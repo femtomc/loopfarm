@@ -26,12 +26,19 @@ def _print_help() -> None:
     console.print("  history   alias for `sessions list`")
     console.print()
     console.print("[bold]Required Config[/bold]")
-    console.print("  .loopfarm/loopfarm.toml with a strict [program] block", markup=False)
+    console.print(
+        "  .loopfarm/loopfarm.toml or .loopfarm/programs/*.toml",
+        markup=False,
+    )
+    console.print("  each TOML file defines one strict [program] block", markup=False)
     console.print("  [program].steps defines phase IDs and loop order", markup=False)
     console.print("  phase IDs are user-defined (pattern: [a-z][a-z0-9_-]*)", markup=False)
     console.print()
     console.print("[bold]Options[/bold]")
-    console.print("  --program NAME   program name (must match [program].name)", markup=False)
+    console.print(
+        "  --program NAME   program name (required when multiple are configured)",
+        markup=False,
+    )
     console.print("  --project NAME   override [program].project", markup=False)
     console.print("  --version        print installed loopfarm version")
     console.print("  -h, --help")
@@ -50,22 +57,52 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _format_available_programs(programs: tuple[ProgramFileConfig, ...]) -> str:
+    names = sorted({program.name for program in programs})
+    return ", ".join(repr(name) for name in names)
+
+
 def _select_program(args: argparse.Namespace, file_cfg: LoopfarmFileConfig) -> ProgramFileConfig:
-    program = file_cfg.program
-    if program is None:
-        message = file_cfg.error or "missing or invalid .loopfarm/loopfarm.toml [program] configuration"
+    if file_cfg.error is not None:
+        print(f"error: {file_cfg.error}", file=sys.stderr)
+        raise SystemExit(2)
+
+    programs: tuple[ProgramFileConfig, ...]
+    if file_cfg.programs:
+        programs = file_cfg.programs
+    elif file_cfg.program is not None:
+        programs = (file_cfg.program,)
+    else:
+        programs = ()
+
+    if not programs:
+        message = (
+            "missing or invalid .loopfarm/loopfarm.toml or .loopfarm/programs/*.toml "
+            "[program] configuration"
+        )
         print(f"error: {message}", file=sys.stderr)
         raise SystemExit(2)
 
     requested = (args.program or "").strip()
-    if requested and requested != program.name:
+    if requested:
+        for program in programs:
+            if requested == program.name:
+                return program
         print(
-            f"error: program {requested!r} not found (configured: {program.name!r})",
+            f"error: program {requested!r} not found (available: {_format_available_programs(programs)})",
             file=sys.stderr,
         )
         raise SystemExit(2)
 
-    return program
+    if len(programs) == 1:
+        return programs[0]
+
+    print(
+        "error: multiple programs available; pass --program NAME "
+        f"(available: {_format_available_programs(programs)})",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 def _required_phases(program: ProgramFileConfig) -> list[str]:

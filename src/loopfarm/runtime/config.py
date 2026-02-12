@@ -36,6 +36,7 @@ class ProgramFileConfig:
     report_source_phase: str | None
     report_target_phases: tuple[str, ...]
     phases: dict[str, ProgramPhaseFileConfig] = field(default_factory=dict)
+    source_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class LoopfarmFileConfig:
     repo_root: Path
     path: Path
     program: ProgramFileConfig | None = None
+    programs: tuple[ProgramFileConfig, ...] = ()
     error: str | None = None
 
 
@@ -190,7 +192,7 @@ def _parse_program_phases(raw: object) -> dict[str, ProgramPhaseFileConfig]:
     return out
 
 
-def _parse_program(raw: object) -> ProgramFileConfig:
+def _parse_program(raw: object, *, source_path: Path | None = None) -> ProgramFileConfig:
     if raw is None:
         raise ConfigValidationError("missing [program] section")
     if not isinstance(raw, dict):
@@ -262,6 +264,7 @@ def _parse_program(raw: object) -> ProgramFileConfig:
         report_source_phase=report_source_phase,
         report_target_phases=tuple(report_target_phases),
         phases=_parse_program_phases(raw.get("phase")),
+        source_path=source_path,
     )
 
 
@@ -272,36 +275,90 @@ def _format_path(path: Path, repo_root: Path) -> str:
         return str(path)
 
 
+def _discover_program_paths(repo_root: Path) -> tuple[Path, ...]:
+    legacy = repo_root / ".loopfarm" / "loopfarm.toml"
+    programs_dir = repo_root / ".loopfarm" / "programs"
+
+    out: list[Path] = []
+    if legacy.exists() and legacy.is_file():
+        out.append(legacy)
+
+    if programs_dir.exists() and programs_dir.is_dir():
+        out.extend(
+            sorted(
+                (
+                    path
+                    for path in programs_dir.iterdir()
+                    if path.is_file() and path.suffix == ".toml"
+                ),
+                key=lambda path: path.name,
+            )
+        )
+
+    return tuple(out)
+
+
 def load_config(repo_root: Path) -> LoopfarmFileConfig:
-    path = repo_root / ".loopfarm" / "loopfarm.toml"
-    if not path.exists():
+    legacy_path = repo_root / ".loopfarm" / "loopfarm.toml"
+    paths = _discover_program_paths(repo_root)
+    if not paths:
         return LoopfarmFileConfig(
             repo_root=repo_root,
-            path=path,
-            error=f"config file not found: {_format_path(path, repo_root)}",
+            path=legacy_path,
+            error=(
+                "no program config found: expected .loopfarm/loopfarm.toml "
+                "or .loopfarm/programs/*.toml"
+            ),
         )
 
-    raw: dict[str, Any]
-    try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        return LoopfarmFileConfig(
-            repo_root=repo_root,
-            path=path,
-            error=f"invalid TOML in {_format_path(path, repo_root)}: {exc}",
-        )
+    programs: list[ProgramFileConfig] = []
+    source_by_name: dict[str, Path] = {}
+    for path in paths:
+        raw: dict[str, Any]
+        try:
+            raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return LoopfarmFileConfig(
+                repo_root=repo_root,
+                path=path,
+                error=f"invalid TOML in {_format_path(path, repo_root)}: {exc}",
+            )
 
-    try:
-        program = _parse_program(raw.get("program"))
-    except ConfigValidationError as exc:
-        return LoopfarmFileConfig(
-            repo_root=repo_root,
-            path=path,
-            error=str(exc),
-        )
+        try:
+            program = _parse_program(raw.get("program"), source_path=path)
+        except ConfigValidationError as exc:
+            return LoopfarmFileConfig(
+                repo_root=repo_root,
+                path=path,
+                error=f"{_format_path(path, repo_root)}: {exc}",
+            )
+
+        conflict = source_by_name.get(program.name)
+        if conflict is not None:
+            conflict_paths = sorted(
+                (
+                    _format_path(conflict, repo_root),
+                    _format_path(path, repo_root),
+                )
+            )
+            return LoopfarmFileConfig(
+                repo_root=repo_root,
+                path=path,
+                error=(
+                    f"duplicate [program].name {program.name!r} in "
+                    f"{conflict_paths[0]} and {conflict_paths[1]}"
+                ),
+                programs=tuple(programs),
+            )
+
+        programs.append(program)
+        source_by_name[program.name] = path
+
+    selected = programs[0] if len(programs) == 1 else None
 
     return LoopfarmFileConfig(
         repo_root=repo_root,
-        path=path,
-        program=program,
+        path=selected.source_path if selected and selected.source_path else legacy_path,
+        program=selected,
+        programs=tuple(programs),
     )

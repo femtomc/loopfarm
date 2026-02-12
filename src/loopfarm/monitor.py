@@ -34,288 +34,590 @@ _HTML_TEMPLATE = """<!doctype html>
   <title>loopfarm monitor</title>
   <style>
     :root {
-      --bg: #0d0f11;
-      --panel: #14181d;
-      --panel-2: #1b2026;
-      --fg: #dde4ea;
-      --muted: #8d9aa8;
-      --ok: #57d68d;
-      --warn: #f8cd6e;
-      --err: #ff7f7f;
-      --accent: #6ee7f7;
-      --border: #2a333d;
+      --emes-font-sans: "Univers LT Pro", -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      --emes-font-mono: "Berkeley Mono", "TX-02-Data", "Roboto Mono", Menlo, Courier, monospace;
+      --emes-black: #000;
+      --emes-white: #fff;
+      --emes-blue: #002dce;
+      --emes-gold: #ffb700;
+      --emes-dark-green: #00794c;
+      --emes-red: #e7040f;
+      --emes-gray-900: #111;
+      --emes-gray-700: #555;
+      --emes-gray-600: #777;
+      --emes-gray-500: #999;
+      --emes-gray-300: #bbb;
+      --emes-gray-200: #ccc;
+      --emes-gray-100: #ddd;
+      --emes-gray-50: #eee;
+      --emes-gray-25: #f9fafb;
+      --emes-shadow: 2px 2px var(--emes-gray-300);
+      --emes-dot-pattern: radial-gradient(var(--emes-gray-600) 0.5px, transparent 1px) 0 0 / 3px 3px;
     }
     * { box-sizing: border-box; }
+    html {
+      font-family: var(--emes-font-sans);
+      font-size: 15px;
+      line-height: 1.45;
+      background: var(--emes-gray-50);
+    }
     body {
       margin: 0;
-      background: linear-gradient(180deg, #0b0d10 0%, var(--bg) 100%);
-      color: var(--fg);
-      font-family: "JetBrains Mono", "Iosevka Term", "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.35;
+      color: var(--emes-black);
+      background: var(--emes-white);
+      text-rendering: optimizeLegibility;
     }
     .top {
       position: sticky;
       top: 0;
-      z-index: 10;
-      background: rgba(13, 15, 17, 0.96);
-      backdrop-filter: blur(8px);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 10px;
+      z-index: 20;
+      background: var(--emes-white);
+      border-bottom: 2px solid var(--emes-black);
+      padding: 0.75rem 1rem;
       display: grid;
-      gap: 6px;
+      gap: 0.6rem;
     }
-    .brand { color: var(--accent); font-weight: 700; }
-    .metrics {
+    .brand-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .brand {
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--emes-gray-600);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      padding: 0.35rem 0.5rem;
+      background: var(--emes-gray-25);
+      border: 1px solid var(--emes-black);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .status-bar-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border: 1px solid var(--emes-black);
+      border-radius: 50%;
+      background: var(--emes-dark-green);
+    }
+    .query-meta {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 6px;
+      gap: 0.45rem;
+      padding: 0.45rem;
+      border: 1px solid var(--emes-black);
+      background: var(--emes-gray-25);
     }
-    .metric {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px 6px;
-      min-height: 40px;
+    .query-meta-item {
+      border: 1px solid var(--emes-gray-300);
+      background: var(--emes-white);
+      padding: 0.3rem 0.4rem;
+      min-height: 46px;
     }
-    .metric .k { color: var(--muted); font-size: 11px; }
-    .metric .v { font-size: 14px; font-weight: 700; }
+    .query-meta-label {
+      display: block;
+      font-size: 0.68rem;
+      color: var(--emes-gray-600);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .query-meta-value {
+      display: block;
+      margin-top: 0.1rem;
+      font-family: var(--emes-font-mono);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .metrics {
+      display: none;
+    }
+    .box {
+      position: relative;
+      border: 2px solid var(--emes-black);
+      background: var(--emes-white);
+      padding: 0.65rem;
+      margin: 0;
+    }
+    .box[data-label]::before {
+      content: attr(data-label);
+      position: absolute;
+      top: -0.6rem;
+      left: 0.7rem;
+      background: var(--emes-white);
+      padding: 0 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .box-shadow {
+      box-shadow: var(--emes-shadow);
+    }
     .filter-row {
       display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
       align-items: center;
-    }
-    .filter-row input {
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--fg);
-      padding: 6px 8px;
-      font: inherit;
     }
     .actions-row {
       display: grid;
-      gap: 6px;
+      gap: 0.45rem;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       align-items: center;
-      margin-top: 4px;
+      margin-top: 0.35rem;
     }
     .actions-row.tight {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
-    .actions-row input, .actions-row select, .actions-row button {
+    .input-brutal,
+    .select-brutal,
+    .textarea-brutal {
       width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--fg);
-      padding: 6px 8px;
+      border: 1px solid var(--emes-black);
+      border-radius: 0;
+      padding: 0.42rem 0.55rem;
+      background: var(--emes-white);
+      color: var(--emes-black);
       font: inherit;
+      box-shadow: var(--emes-shadow);
     }
-    .actions-row button {
-      background: var(--panel-2);
-      font-weight: 700;
+    .input-brutal:focus,
+    .select-brutal:focus,
+    .textarea-brutal:focus {
+      outline: 2px solid var(--emes-blue);
+      outline-offset: 1px;
     }
-    .actions-row button:hover {
-      border-color: var(--accent);
+    .btn-brutal {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0.44rem 0.8rem;
+      border: 1px solid var(--emes-black);
+      background: var(--emes-white);
+      color: var(--emes-black);
+      text-transform: lowercase;
+      font-size: 0.86rem;
+      font-weight: 600;
       cursor: pointer;
+      box-shadow: var(--emes-shadow);
+    }
+    .btn-brutal:hover {
+      background: var(--emes-black);
+      color: var(--emes-white);
+    }
+    .btn-brutal:active {
+      box-shadow: none;
+      transform: translate(2px, 2px);
+    }
+    .btn-brutal:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .btn-brutal-primary {
+      background: var(--emes-gold);
+    }
+    .btn-brutal-green {
+      background: var(--emes-dark-green);
+      color: var(--emes-white);
+    }
+    .btn-brutal-green:hover {
+      background: var(--emes-dark-green);
+      color: var(--emes-white);
+      filter: brightness(0.92);
+    }
+    .btn-danger {
+      background: var(--emes-red);
+      color: var(--emes-white);
+    }
+    .btn-danger:hover {
+      background: var(--emes-red);
+      color: var(--emes-white);
+      filter: brightness(0.92);
     }
     .panel-actions {
-      padding: 8px;
-      border-bottom: 1px solid var(--border);
-      background: #0f1318;
+      padding: 0.5rem;
+      border: 1px solid var(--emes-black);
+      background: var(--emes-gray-25);
+      margin-bottom: 0.6rem;
     }
     .panel-actions .label {
-      color: var(--muted);
-      margin-bottom: 4px;
+      color: var(--emes-gray-700);
+      margin-bottom: 0.1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .panel-actions.disabled {
+      opacity: 0.6;
     }
     .container {
       display: grid;
-      gap: 8px;
-      padding: 8px;
+      gap: 0.85rem;
+      padding: 0.95rem;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      border-bottom: 1px solid var(--emes-gray-300);
+      padding-bottom: 0.6rem;
+      margin-bottom: 0.35rem;
+    }
+    .btn-nav {
+      min-width: 110px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.72rem;
+    }
+    .btn-nav.is-active {
+      background: var(--emes-black);
+      color: var(--emes-white);
+    }
+    .tab-pane {
+      display: none;
+    }
+    .tab-pane.is-active {
+      display: block;
+    }
+    .tab-layout {
+      display: grid;
+      gap: 0.85rem;
+    }
+    .selection-badge {
+      border: 1px dashed var(--emes-gray-600);
+      padding: 0.35rem 0.45rem;
+      background: var(--emes-gray-25);
+      margin-bottom: 0.45rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
     .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      background: var(--emes-white);
       overflow: hidden;
     }
     .panel h2 {
       margin: 0;
-      padding: 8px 10px;
-      background: var(--panel-2);
-      border-bottom: 1px solid var(--border);
-      font-size: 12px;
-      letter-spacing: 0.02em;
+      padding: 0;
+      background: transparent;
+      border-bottom: 1px solid var(--emes-gray-300);
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
+      margin-bottom: 0.45rem;
+      padding-bottom: 0.35rem;
     }
     .scroll {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
     }
-    table {
+    table.table-brutal {
       width: 100%;
       border-collapse: collapse;
       white-space: nowrap;
     }
-    th, td {
+    .table-brutal th,
+    .table-brutal td {
+      border: 1px solid var(--emes-black);
+      padding: 0.45rem 0.5rem;
       text-align: left;
-      border-bottom: 1px solid var(--border);
-      padding: 6px 8px;
       vertical-align: top;
     }
-    th { color: var(--muted); font-weight: 600; }
-    tr:hover { background: rgba(255, 255, 255, 0.03); cursor: pointer; }
-    .status-running { color: var(--ok); }
-    .status-complete { color: var(--accent); }
-    .status-interrupted, .status-stopped { color: var(--warn); }
-    .status-failed, .status-error { color: var(--err); }
+    .table-brutal th {
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 0.66rem;
+      color: var(--emes-gray-700);
+      background: var(--emes-gray-25);
+      font-weight: 700;
+    }
+    .table-brutal tbody tr:hover {
+      background: #f5f7ff;
+      cursor: pointer;
+    }
+    .table-brutal tbody tr.is-selected {
+      background: #fff3cf;
+    }
+    .status-running { color: var(--emes-dark-green); font-weight: 700; }
+    .status-complete { color: var(--emes-blue); font-weight: 700; }
+    .status-interrupted, .status-stopped { color: #9a5800; font-weight: 700; }
+    .status-failed, .status-error { color: var(--emes-red); font-weight: 700; }
     .mono-pre {
       margin: 0;
-      padding: 8px;
-      max-height: 280px;
+      padding: 0.6rem;
+      max-height: 340px;
       overflow: auto;
-      background: #0f1318;
-      border-top: 1px solid var(--border);
+      border: 1px solid var(--emes-black);
+      background: var(--emes-gray-25);
       white-space: pre-wrap;
       word-break: break-word;
+      font-family: var(--emes-font-mono);
+      font-size: 0.82rem;
+      line-height: 1.35;
     }
-    .hint { color: var(--muted); padding: 8px; }
+    .hint {
+      color: var(--emes-gray-700);
+      font-size: 0.78rem;
+      padding: 0.35rem 0;
+    }
+    .workflow-list {
+      margin: 0.2rem 0 0;
+      padding-left: 1.15rem;
+      font-size: 0.82rem;
+      line-height: 1.3;
+    }
+    .workflow-list li {
+      margin: 0.28rem 0;
+    }
+    #action-status {
+      border: 1px solid var(--emes-gray-300);
+      padding: 0.4rem 0.5rem;
+      min-height: 2rem;
+      background: var(--emes-gray-25);
+      font-size: 0.82rem;
+      font-family: var(--emes-font-mono);
+    }
+    #action-status.ok {
+      border-color: var(--emes-dark-green);
+      background: #eef8f3;
+      color: var(--emes-dark-green);
+    }
+    #action-status.warn {
+      border-color: #9a5800;
+      background: #fff6e6;
+      color: #9a5800;
+    }
+    #action-status.err {
+      border-color: var(--emes-red);
+      background: #fff0f0;
+      color: var(--emes-red);
+    }
     .topic-msg {
-      border-top: 1px solid var(--border);
-      padding: 6px 8px;
+      border: 1px solid var(--emes-black);
+      margin-top: 0.3rem;
+      padding: 0.45rem 0.5rem;
+      background: var(--emes-white);
     }
-    .topic-msg .meta { color: var(--muted); }
-    .topic-msg .body { margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
-    @media (min-width: 980px) {
-      .container {
-        grid-template-columns: 1.2fr 1fr;
-        grid-template-areas:
-          "loops details"
-          "issues forum";
+    .topic-msg .meta {
+      color: var(--emes-gray-700);
+      font-size: 0.72rem;
+      font-family: var(--emes-font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .topic-msg .body {
+      margin-top: 0.15rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--emes-font-mono);
+      font-size: 0.8rem;
+    }
+    @media (max-width: 980px) {
+      .query-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
-      #panel-loops { grid-area: loops; }
-      #panel-details { grid-area: details; }
-      #panel-issues { grid-area: issues; }
-      #panel-forum { grid-area: forum; }
+      .actions-row,
+      .actions-row.tight {
+        grid-template-columns: 1fr;
+      }
+      .top {
+        position: static;
+      }
+    }
+    @media (min-width: 1120px) {
+      .tab-layout.two-col {
+        grid-template-columns: 1.15fr 1fr;
+      }
     }
   </style>
 </head>
 <body>
   <header class="top">
-    <div><span class="brand">loopfarm monitor</span> <span id="generated" class="hint"></span></div>
-    <div class="metrics">
-      <div class="metric"><div class="k">Active Loops</div><div id="m-active" class="v">-</div></div>
-      <div class="metric"><div class="k">In Progress Issues</div><div id="m-inprogress" class="v">-</div></div>
-      <div class="metric"><div class="k">Open Issues</div><div id="m-open" class="v">-</div></div>
-      <div class="metric"><div class="k">Forum Topics</div><div id="m-topics" class="v">-</div></div>
+    <div class="brand-row">
+      <div>
+        <span class="brand">loopfarm operator console</span>
+        <span class="subtitle">frontend control plane for programmable loops</span>
+      </div>
+      <span id="generated" class="hint"></span>
+    </div>
+    <div class="status-bar">
+      <div class="status-bar-item"><span class="status-dot"></span><span>monitor online</span></div>
+      <div class="status-bar-item"><span>host</span><span id="host" class="query-meta-value">-</span></div>
+      <div class="status-bar-item"><span>selection</span><span id="selection-status" class="query-meta-value">none</span></div>
+    </div>
+    <div class="query-meta">
+      <div class="query-meta-item"><span class="query-meta-label">active loops</span><span id="m-active" class="query-meta-value">-</span></div>
+      <div class="query-meta-item"><span class="query-meta-label">in progress issues</span><span id="m-inprogress" class="query-meta-value">-</span></div>
+      <div class="query-meta-item"><span class="query-meta-label">open issues</span><span id="m-open" class="query-meta-value">-</span></div>
+      <div class="query-meta-item"><span class="query-meta-label">forum topics</span><span id="m-topics" class="query-meta-value">-</span></div>
+    </div>
+    <div class="box box-shadow" data-label="Quick Start">
+      <ol class="workflow-list">
+        <li>Enter a prompt under <strong>Start New Loop</strong>, then click <strong>start loop</strong>.</li>
+        <li>Select a row in <strong>Loops</strong> to inspect output and use pause/resume/stop/context controls.</li>
+        <li>Select a row in <strong>Issues</strong> to inspect details, then update status/comment in-place.</li>
+        <li>Select a <strong>Forum Topic</strong> to read messages; use post form to inject instructions/state.</li>
+      </ol>
+    </div>
+    <div class="box box-shadow" data-label="Start New Loop">
+      <div class="actions-row">
+        <input class="input-brutal" id="start-prompt" type="text" placeholder="new loop prompt" />
+        <input class="input-brutal" id="start-program" type="text" placeholder="program (optional)" />
+        <input class="input-brutal" id="start-project" type="text" placeholder="project override (optional)" />
+        <button class="btn-brutal btn-brutal-primary" id="start-loop">start loop</button>
+      </div>
     </div>
     <div class="filter-row">
-      <input id="filter" type="text" placeholder="filter sessions/issues/topics (id, title, prompt, tag)" />
-      <span id="host" class="hint"></span>
+      <input class="input-brutal" id="filter" type="text" placeholder="filter loops/issues/topics (id, status, title, prompt, tag)" />
     </div>
-    <div class="actions-row">
-      <input id="start-prompt" type="text" placeholder="new loop prompt" />
-      <input id="start-program" type="text" placeholder="program (optional)" />
-      <input id="start-project" type="text" placeholder="project override (optional)" />
-      <button id="start-loop">Start Loop</button>
-    </div>
-    <div id="action-status" class="hint"></div>
+    <div id="action-status">ready.</div>
   </header>
 
   <main class="container">
-    <section id="panel-loops" class="panel">
-      <h2>Loops</h2>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr><th>Session</th><th>Status</th><th>Phase</th><th>Iter</th><th>Started</th><th>Prompt</th></tr>
-          </thead>
-          <tbody id="sessions-body"></tbody>
-        </table>
+    <nav class="tabs" role="tablist" aria-label="Loopfarm domains">
+      <button class="btn-brutal btn-nav is-active" id="tab-btn-loops" data-tab="loops" role="tab" aria-controls="tab-loops">loops</button>
+      <button class="btn-brutal btn-nav" id="tab-btn-issues" data-tab="issues" role="tab" aria-controls="tab-issues">issues</button>
+      <button class="btn-brutal btn-nav" id="tab-btn-forum" data-tab="forum" role="tab" aria-controls="tab-forum">forum</button>
+    </nav>
+
+    <section id="tab-loops" class="tab-pane is-active" role="tabpanel">
+      <div class="tab-layout two-col">
+        <section class="panel box box-shadow">
+          <h2>Loops</h2>
+          <div class="hint">Start new loop runs, then select a session row to inspect details and send controls.</div>
+          <div class="scroll">
+            <table class="table-brutal">
+              <thead>
+                <tr><th>Session</th><th>Status</th><th>Phase</th><th>Iter</th><th>Started</th><th>Prompt</th></tr>
+              </thead>
+              <tbody id="sessions-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel box box-shadow">
+          <h2>Loop Detail</h2>
+          <div id="loops-details-context" class="selection-badge">Selected: none</div>
+          <div id="loops-details-empty" class="hint">Select a loop session from the loops table.</div>
+          <pre id="loops-details-pre" class="mono-pre" style="display:none"></pre>
+          <div id="session-controls" class="panel-actions disabled">
+            <div class="label">Session Controls</div>
+            <div class="actions-row tight">
+              <button class="btn-brutal" id="session-pause">pause</button>
+              <button class="btn-brutal btn-brutal-green" id="session-resume">resume</button>
+              <button class="btn-brutal btn-danger" id="session-stop">stop</button>
+            </div>
+            <div class="actions-row">
+              <input class="input-brutal" id="session-context" type="text" placeholder="session context override" />
+              <input class="input-brutal" id="session-author" type="text" placeholder="author (optional)" />
+              <button class="btn-brutal" id="session-context-set">set context</button>
+              <button class="btn-brutal" id="session-context-clear">clear context</button>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
 
-    <section id="panel-details" class="panel">
-      <h2>Details</h2>
-      <div id="details-empty" class="hint">Tap a session or forum topic for details.</div>
-      <pre id="details-pre" class="mono-pre" style="display:none"></pre>
-      <div id="session-controls" class="panel-actions" style="display:none">
-        <div class="label">Session Controls</div>
-        <div class="actions-row tight">
-          <button id="session-pause">Pause</button>
-          <button id="session-resume">Resume</button>
-          <button id="session-stop">Stop</button>
-        </div>
-        <div class="actions-row">
-          <input id="session-context" type="text" placeholder="session context override" />
-          <input id="session-author" type="text" placeholder="author (optional)" />
-          <button id="session-context-set">Set Context</button>
-          <button id="session-context-clear">Clear Context</button>
-        </div>
-      </div>
-      <div id="topic-messages"></div>
-    </section>
-
-    <section id="panel-issues" class="panel">
-      <h2>Issues</h2>
-      <div class="panel-actions">
-        <div class="label">Create Issue</div>
-        <div class="actions-row">
-          <input id="issue-title" type="text" placeholder="issue title" />
-          <input id="issue-tags" type="text" placeholder="tags (comma-separated)" />
-          <select id="issue-priority">
-            <option value="1">P1</option>
-            <option value="2">P2</option>
-            <option value="3" selected>P3</option>
-            <option value="4">P4</option>
-            <option value="5">P5</option>
-          </select>
-          <button id="issue-create">Create</button>
-        </div>
-        <div class="label">Update Selected Issue</div>
-        <div class="actions-row">
-          <input id="issue-selected" type="text" placeholder="select an issue row" readonly />
-          <select id="issue-status">
-            <option value="open">open</option>
-            <option value="in_progress">in_progress</option>
-            <option value="paused">paused</option>
-            <option value="closed">closed</option>
-          </select>
-          <input id="issue-comment" type="text" placeholder="comment for selected issue" />
-          <button id="issue-update">Apply</button>
-        </div>
-      </div>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr><th>ID</th><th>St</th><th>P</th><th>Updated</th><th>Title</th></tr>
-          </thead>
-          <tbody id="issues-body"></tbody>
-        </table>
+    <section id="tab-issues" class="tab-pane" role="tabpanel">
+      <div class="tab-layout two-col">
+        <section class="panel box box-shadow">
+          <h2>Issues</h2>
+          <div class="hint">Create and update tracker items. Selecting a row opens full detail and dependency graph.</div>
+          <div class="panel-actions">
+            <div class="label">Create Issue</div>
+            <div class="actions-row">
+              <input class="input-brutal" id="issue-title" type="text" placeholder="issue title" />
+              <input class="input-brutal" id="issue-tags" type="text" placeholder="tags (comma-separated)" />
+              <select class="select-brutal" id="issue-priority">
+                <option value="1">P1</option>
+                <option value="2">P2</option>
+                <option value="3" selected>P3</option>
+                <option value="4">P4</option>
+                <option value="5">P5</option>
+              </select>
+              <button class="btn-brutal" id="issue-create">create</button>
+            </div>
+            <div class="label">Update Selected Issue</div>
+            <div class="actions-row">
+              <input class="input-brutal" id="issue-selected" type="text" placeholder="select an issue row" readonly />
+              <select class="select-brutal" id="issue-status">
+                <option value="open">open</option>
+                <option value="in_progress">in_progress</option>
+                <option value="paused">paused</option>
+                <option value="closed">closed</option>
+              </select>
+              <input class="input-brutal" id="issue-comment" type="text" placeholder="comment for selected issue" />
+              <button class="btn-brutal" id="issue-update">apply</button>
+            </div>
+          </div>
+          <div class="scroll">
+            <table class="table-brutal">
+              <thead>
+                <tr><th>ID</th><th>St</th><th>P</th><th>Updated</th><th>Title</th></tr>
+              </thead>
+              <tbody id="issues-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel box box-shadow">
+          <h2>Issue Detail</h2>
+          <div id="issues-details-context" class="selection-badge">Selected: none</div>
+          <div id="issues-details-empty" class="hint">Select an issue row from the issues table.</div>
+          <pre id="issues-details-pre" class="mono-pre" style="display:none"></pre>
+        </section>
       </div>
     </section>
 
-    <section id="panel-forum" class="panel">
-      <h2>Forum Topics</h2>
-      <div class="panel-actions">
-        <div class="label">Post Message</div>
-        <div class="actions-row">
-          <input id="forum-topic" type="text" placeholder="topic name" />
-          <input id="forum-author" type="text" placeholder="author (optional)" />
-          <input id="forum-message" type="text" placeholder="message" />
-          <button id="forum-post">Post</button>
-        </div>
-      </div>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr><th>Topic</th><th>Type</th><th>Created</th></tr>
-          </thead>
-          <tbody id="topics-body"></tbody>
-        </table>
+    <section id="tab-forum" class="tab-pane" role="tabpanel">
+      <div class="tab-layout two-col">
+        <section class="panel box box-shadow">
+          <h2>Forum Topics</h2>
+          <div class="hint">Post loop instructions/state to a topic, then select topics to inspect full message history.</div>
+          <div class="panel-actions">
+            <div class="label">Post Message</div>
+            <div class="actions-row">
+              <input class="input-brutal" id="forum-topic" type="text" placeholder="topic name" />
+              <input class="input-brutal" id="forum-author" type="text" placeholder="author (optional)" />
+              <input class="input-brutal" id="forum-message" type="text" placeholder="message" />
+              <button class="btn-brutal" id="forum-post">post</button>
+            </div>
+          </div>
+          <div class="scroll">
+            <table class="table-brutal">
+              <thead>
+                <tr><th>Topic</th><th>Type</th><th>Created</th></tr>
+              </thead>
+              <tbody id="topics-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel box box-shadow">
+          <h2>Topic Detail</h2>
+          <div id="forum-details-context" class="selection-badge">Selected: none</div>
+          <div id="forum-details-empty" class="hint">Select a forum topic row from the topics table.</div>
+          <pre id="forum-details-pre" class="mono-pre" style="display:none"></pre>
+          <div id="forum-topic-messages"></div>
+        </section>
       </div>
     </section>
   </main>
@@ -329,6 +631,7 @@ _HTML_TEMPLATE = """<!doctype html>
       selectedSession: null,
       selectedTopic: null,
       selectedIssue: null,
+      activeTab: "loops",
     };
 
     function esc(v) {
@@ -347,13 +650,86 @@ _HTML_TEMPLATE = """<!doctype html>
       return String(text || "").toLowerCase().includes(state.filter);
     }
 
-    function showActionStatus(message) {
+    function showActionStatus(message, level = "info") {
       const node = document.getElementById("action-status");
       node.textContent = message || "";
+      node.classList.remove("ok", "warn", "err");
+      if (level === "ok" || level === "warn" || level === "err") {
+        node.classList.add(level);
+      }
     }
 
-    function setSessionControlsVisible(visible) {
-      document.getElementById("session-controls").style.display = visible ? "block" : "none";
+    function setSelectionStatus(value) {
+      document.getElementById("selection-status").textContent = value || "none";
+    }
+
+    function setPanelSelection(panel, value) {
+      const el = document.getElementById(`${panel}-details-context`);
+      if (el) {
+        el.textContent = value ? `Selected: ${value}` : "Selected: none";
+      }
+    }
+
+    function setActiveTab(tab) {
+      state.activeTab = tab;
+      const tabs = ["loops", "issues", "forum"];
+      for (const name of tabs) {
+        const btn = document.getElementById(`tab-btn-${name}`);
+        const pane = document.getElementById(`tab-${name}`);
+        if (btn) btn.classList.toggle("is-active", name === tab);
+        if (pane) pane.classList.toggle("is-active", name === tab);
+      }
+    }
+
+    function setSessionControlsVisible(enabled) {
+      const controls = document.getElementById("session-controls");
+      controls.classList.toggle("disabled", !enabled);
+      const ids = [
+        "session-pause",
+        "session-resume",
+        "session-stop",
+        "session-context",
+        "session-author",
+        "session-context-set",
+        "session-context-clear",
+      ];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !enabled;
+      }
+    }
+
+    function resetLoopDetail() {
+      setSessionControlsVisible(false);
+      setPanelSelection("loops", null);
+      const empty = document.getElementById("loops-details-empty");
+      const pre = document.getElementById("loops-details-pre");
+      empty.textContent = "Select a loop session from the loops table.";
+      empty.style.display = "block";
+      pre.style.display = "none";
+      pre.textContent = "";
+    }
+
+    function resetIssueDetail() {
+      setPanelSelection("issues", null);
+      const empty = document.getElementById("issues-details-empty");
+      const pre = document.getElementById("issues-details-pre");
+      empty.textContent = "Select an issue row from the issues table.";
+      empty.style.display = "block";
+      pre.style.display = "none";
+      pre.textContent = "";
+    }
+
+    function resetForumDetail() {
+      setPanelSelection("forum", null);
+      const empty = document.getElementById("forum-details-empty");
+      const pre = document.getElementById("forum-details-pre");
+      const messages = document.getElementById("forum-topic-messages");
+      empty.textContent = "Select a forum topic row from the topics table.";
+      empty.style.display = "block";
+      pre.style.display = "none";
+      pre.textContent = "";
+      messages.innerHTML = "";
     }
 
     async function apiGet(url) {
@@ -389,8 +765,8 @@ _HTML_TEMPLATE = """<!doctype html>
 
     function applyMetrics(data) {
       const counts = data.issue_counts || {};
-      document.getElementById("generated").textContent = `updated ${fmtTime(data.generated_at)}`;
-      document.getElementById("host").textContent = `${data.host || "-"} · refresh ${Math.round(REFRESH_MS / 1000)}s`;
+      document.getElementById("generated").textContent = `updated ${fmtTime(data.generated_at)} · refresh ${Math.round(REFRESH_MS / 1000)}s`;
+      document.getElementById("host").textContent = String(data.host || "-");
       document.getElementById("m-active").textContent = String((data.sessions || []).filter((s) => s.status === "running").length);
       document.getElementById("m-inprogress").textContent = String(counts.in_progress || 0);
       document.getElementById("m-open").textContent = String(counts.open || 0);
@@ -404,7 +780,8 @@ _HTML_TEMPLATE = """<!doctype html>
       });
       const html = rows.map((s) => {
         const statusClass = `status-${String(s.status || "").toLowerCase()}`;
-        return `<tr data-kind="session" data-id="${esc(s.session_id)}">`
+        const rowClass = state.selectedSession === s.session_id ? "is-selected" : "";
+        return `<tr class="${rowClass}" data-kind="session" data-id="${esc(s.session_id)}">`
           + `<td>${esc(s.session_id)}</td>`
           + `<td class="${statusClass}">${esc(s.status || "-")}</td>`
           + `<td>${esc(s.phase || "-")}</td>`
@@ -423,7 +800,8 @@ _HTML_TEMPLATE = """<!doctype html>
       });
       const html = rows.map((i) => {
         const statusClass = `status-${String(i.status || "").toLowerCase()}`;
-        return `<tr data-kind="issue" data-id="${esc(i.id)}">`
+        const rowClass = state.selectedIssue === i.id ? "is-selected" : "";
+        return `<tr class="${rowClass}" data-kind="issue" data-id="${esc(i.id)}">`
           + `<td>${esc(i.id)}</td>`
           + `<td class="${statusClass}">${esc(i.status)}</td>`
           + `<td>${esc(i.priority ?? "-")}</td>`
@@ -437,7 +815,8 @@ _HTML_TEMPLATE = """<!doctype html>
     function renderTopics(data) {
       const rows = (data.forum_topics || []).filter((t) => isMatch(`${t.name} ${t.kind}`));
       const html = rows.map((t) => {
-        return `<tr data-kind="topic" data-name="${esc(t.name)}">`
+        const rowClass = state.selectedTopic === t.name ? "is-selected" : "";
+        return `<tr class="${rowClass}" data-kind="topic" data-name="${esc(t.name)}">`
           + `<td>${esc(t.name)}</td>`
           + `<td>${esc(t.kind)}</td>`
           + `<td>${esc(fmtTime(t.created_at_iso || t.created_at))}</td>`
@@ -447,16 +826,19 @@ _HTML_TEMPLATE = """<!doctype html>
     }
 
     function renderSessionDetail(sessionId) {
-      const detailsPre = document.getElementById("details-pre");
-      const detailsEmpty = document.getElementById("details-empty");
-      const topicMessages = document.getElementById("topic-messages");
-      topicMessages.innerHTML = "";
+      const detailsPre = document.getElementById("loops-details-pre");
+      const detailsEmpty = document.getElementById("loops-details-empty");
       setSessionControlsVisible(true);
+      setPanelSelection("loops", `session ${sessionId}`);
+      setSelectionStatus(`session:${sessionId}`);
       const session = (state.data.sessions || []).find((s) => s.session_id === sessionId);
       if (!session) {
         detailsEmpty.style.display = "block";
+        detailsEmpty.textContent = `Session not found: ${sessionId}`;
         detailsPre.style.display = "none";
         setSessionControlsVisible(false);
+        setPanelSelection("loops", null);
+        setSelectionStatus("none");
         return;
       }
       const lines = [];
@@ -485,11 +867,10 @@ _HTML_TEMPLATE = """<!doctype html>
     }
 
     async function renderIssueDetail(issueId) {
-      const detailsPre = document.getElementById("details-pre");
-      const detailsEmpty = document.getElementById("details-empty");
-      const topicMessages = document.getElementById("topic-messages");
-      topicMessages.innerHTML = "";
-      setSessionControlsVisible(false);
+      const detailsPre = document.getElementById("issues-details-pre");
+      const detailsEmpty = document.getElementById("issues-details-empty");
+      setPanelSelection("issues", `issue ${issueId}`);
+      setSelectionStatus(`issue:${issueId}`);
       detailsEmpty.style.display = "none";
       detailsPre.style.display = "none";
       detailsPre.textContent = "";
@@ -535,10 +916,11 @@ _HTML_TEMPLATE = """<!doctype html>
     }
 
     async function renderTopicDetail(topicName) {
-      const detailsPre = document.getElementById("details-pre");
-      const detailsEmpty = document.getElementById("details-empty");
-      const topicMessages = document.getElementById("topic-messages");
-      setSessionControlsVisible(false);
+      const detailsPre = document.getElementById("forum-details-pre");
+      const detailsEmpty = document.getElementById("forum-details-empty");
+      const topicMessages = document.getElementById("forum-topic-messages");
+      setPanelSelection("forum", `topic ${topicName}`);
+      setSelectionStatus(`topic:${topicName}`);
       detailsPre.style.display = "none";
       detailsEmpty.style.display = "none";
       topicMessages.innerHTML = `<div class="hint">loading ${esc(topicName)}...</div>`;
@@ -559,6 +941,13 @@ _HTML_TEMPLATE = """<!doctype html>
     }
 
     function attachHandlers() {
+      for (const id of ["tab-btn-loops", "tab-btn-issues", "tab-btn-forum"]) {
+        document.getElementById(id).addEventListener("click", () => {
+          const tab = document.getElementById(id).getAttribute("data-tab");
+          setActiveTab(tab || "loops");
+        });
+      }
+
       document.getElementById("filter").addEventListener("input", (ev) => {
         state.filter = String(ev.target.value || "").trim().toLowerCase();
         if (state.data) {
@@ -575,6 +964,10 @@ _HTML_TEMPLATE = """<!doctype html>
         state.selectedTopic = null;
         state.selectedIssue = null;
         document.getElementById("issue-selected").value = "";
+        setActiveTab("loops");
+        renderSessions(state.data || {});
+        renderIssues(state.data || {});
+        renderTopics(state.data || {});
         renderSessionDetail(state.selectedSession);
       });
 
@@ -585,6 +978,10 @@ _HTML_TEMPLATE = """<!doctype html>
         state.selectedSession = null;
         state.selectedTopic = null;
         document.getElementById("issue-selected").value = state.selectedIssue || "";
+        setActiveTab("issues");
+        renderSessions(state.data || {});
+        renderIssues(state.data || {});
+        renderTopics(state.data || {});
         renderIssueDetail(state.selectedIssue);
       });
 
@@ -595,6 +992,10 @@ _HTML_TEMPLATE = """<!doctype html>
         state.selectedSession = null;
         state.selectedIssue = null;
         document.getElementById("issue-selected").value = "";
+        setActiveTab("forum");
+        renderSessions(state.data || {});
+        renderIssues(state.data || {});
+        renderTopics(state.data || {});
         renderTopicDetail(state.selectedTopic);
       });
 
@@ -602,26 +1003,31 @@ _HTML_TEMPLATE = """<!doctype html>
         const prompt = String(document.getElementById("start-prompt").value || "").trim();
         const program = String(document.getElementById("start-program").value || "").trim();
         const project = String(document.getElementById("start-project").value || "").trim();
+        if (!prompt) {
+          showActionStatus("prompt is required to start a loop", "warn");
+          return;
+        }
         try {
           const result = await apiPost("/api/loops/start", {
             prompt,
             program: program || null,
             project: project || null,
           });
-          showActionStatus(`started ${result.session_id} (${result.program})`);
+          showActionStatus(`started ${result.session_id} (${result.program})`, "ok");
           state.selectedSession = result.session_id;
           state.selectedTopic = null;
           state.selectedIssue = null;
           document.getElementById("start-prompt").value = "";
+          setActiveTab("loops");
           await tick();
         } catch (err) {
-          showActionStatus(`failed to start loop: ${err.message || err}`);
+          showActionStatus(`failed to start loop: ${err.message || err}`, "err");
         }
       });
 
       async function sendControl(command, content) {
         if (!state.selectedSession) {
-          showActionStatus("select a session first");
+          showActionStatus("select a session first", "warn");
           return;
         }
         const author = String(document.getElementById("session-author").value || "").trim();
@@ -631,10 +1037,10 @@ _HTML_TEMPLATE = """<!doctype html>
             content: content || "",
             author: author || null,
           });
-          showActionStatus(`${command} sent to ${state.selectedSession}`);
+          showActionStatus(`${command} sent to ${state.selectedSession}`, "ok");
           await tick();
         } catch (err) {
-          showActionStatus(`control failed: ${err.message || err}`);
+          showActionStatus(`control failed: ${err.message || err}`, "err");
         }
       }
 
@@ -653,6 +1059,10 @@ _HTML_TEMPLATE = """<!doctype html>
         const title = String(document.getElementById("issue-title").value || "").trim();
         const tags = String(document.getElementById("issue-tags").value || "").trim();
         const priority = Number(document.getElementById("issue-priority").value || "3");
+        if (!title) {
+          showActionStatus("issue title is required", "warn");
+          return;
+        }
         try {
           const issue = await apiPost("/api/issues/create", {
             title,
@@ -661,22 +1071,23 @@ _HTML_TEMPLATE = """<!doctype html>
           });
           document.getElementById("issue-title").value = "";
           document.getElementById("issue-tags").value = "";
-          showActionStatus(`created issue ${issue.id}`);
+          showActionStatus(`created issue ${issue.id}`, "ok");
           state.selectedIssue = issue.id;
           state.selectedSession = null;
           state.selectedTopic = null;
           document.getElementById("issue-selected").value = issue.id || "";
+          setActiveTab("issues");
           await tick();
           await renderIssueDetail(issue.id);
         } catch (err) {
-          showActionStatus(`issue create failed: ${err.message || err}`);
+          showActionStatus(`issue create failed: ${err.message || err}`, "err");
         }
       });
 
       document.getElementById("issue-update").addEventListener("click", async () => {
         const issueId = String(document.getElementById("issue-selected").value || "").trim() || state.selectedIssue;
         if (!issueId) {
-          showActionStatus("select an issue first");
+          showActionStatus("select an issue first", "warn");
           return;
         }
         const status = String(document.getElementById("issue-status").value || "").trim();
@@ -687,14 +1098,15 @@ _HTML_TEMPLATE = """<!doctype html>
             await apiPost(`/api/issues/${encodeURIComponent(issueId)}/comment`, { message: comment });
           }
           document.getElementById("issue-comment").value = "";
-          showActionStatus(`updated issue ${issueId}`);
+          showActionStatus(`updated issue ${issueId}`, "ok");
           state.selectedIssue = issueId;
           state.selectedSession = null;
           state.selectedTopic = null;
+          setActiveTab("issues");
           await tick();
           await renderIssueDetail(issueId);
         } catch (err) {
-          showActionStatus(`issue update failed: ${err.message || err}`);
+          showActionStatus(`issue update failed: ${err.message || err}`, "err");
         }
       });
 
@@ -702,21 +1114,26 @@ _HTML_TEMPLATE = """<!doctype html>
         const topic = String(document.getElementById("forum-topic").value || "").trim();
         const message = String(document.getElementById("forum-message").value || "").trim();
         const author = String(document.getElementById("forum-author").value || "").trim();
+        if (!topic || !message) {
+          showActionStatus("forum topic and message are required", "warn");
+          return;
+        }
         try {
           const row = await apiPost("/api/forum/post", {
             topic,
             message,
             author: author || null,
           });
-          showActionStatus(`posted forum message ${row.id} to ${row.topic}`);
+          showActionStatus(`posted forum message ${row.id} to ${row.topic}`, "ok");
           document.getElementById("forum-message").value = "";
           state.selectedTopic = row.topic;
           state.selectedSession = null;
           state.selectedIssue = null;
+          setActiveTab("forum");
           await tick();
           await renderTopicDetail(row.topic);
         } catch (err) {
-          showActionStatus(`forum post failed: ${err.message || err}`);
+          showActionStatus(`forum post failed: ${err.message || err}`, "err");
         }
       });
     }
@@ -729,28 +1146,51 @@ _HTML_TEMPLATE = """<!doctype html>
         renderSessions(data);
         renderIssues(data);
         renderTopics(data);
+
         if (state.selectedSession) {
           renderSessionDetail(state.selectedSession);
-        } else if (state.selectedIssue) {
+        } else {
+          resetLoopDetail();
+        }
+        if (state.selectedIssue) {
           await renderIssueDetail(state.selectedIssue);
-        } else if (state.selectedTopic) {
+        } else {
+          resetIssueDetail();
+        }
+        if (state.selectedTopic) {
           await renderTopicDetail(state.selectedTopic);
         } else {
-          setSessionControlsVisible(false);
+          resetForumDetail();
+        }
+        if (!state.selectedSession && !state.selectedIssue && !state.selectedTopic) {
+          setSelectionStatus("none");
         }
       } catch (err) {
         document.getElementById("generated").textContent = `error: ${err.message || err}`;
+        showActionStatus(`monitor refresh failed: ${err.message || err}`, "err");
       }
     }
 
     async function init() {
       attachHandlers();
+      setActiveTab(state.activeTab);
+      resetLoopDetail();
+      resetIssueDetail();
+      resetForumDetail();
+      setSelectionStatus("none");
       try {
         state.meta = await apiGet("/api/meta");
         if (state.meta && state.meta.program && state.meta.program.name) {
           document.getElementById("start-program").value = state.meta.program.name;
         }
-      } catch (_) {}
+        if (state.meta && state.meta.program_error) {
+          showActionStatus(`program config issue: ${state.meta.program_error}`, "warn");
+        } else {
+          showActionStatus("ready. choose a tab and start operating.", "ok");
+        }
+      } catch (err) {
+        showActionStatus(`failed to load meta: ${err.message || err}`, "err");
+      }
       await tick();
       setInterval(tick, REFRESH_MS);
     }

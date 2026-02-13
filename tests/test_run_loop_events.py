@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 import io
-import os
 from pathlib import Path
 
 from loopfarm.runtime.events import LoopfarmEvent
@@ -120,13 +119,6 @@ def _cfg(tmp_path: Path) -> LoopfarmConfig:
     )
 
 
-def _restore_env(key: str, value: str | None) -> None:
-    if value is None:
-        os.environ.pop(key, None)
-    else:
-        os.environ[key] = value
-
-
 def test_run_loop_event_sink_and_backend_provider(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -150,17 +142,13 @@ def test_run_loop_event_sink_and_backend_provider(
 
     stdout = io.StringIO()
     stderr = io.StringIO()
-    prev_session = os.environ.get("LOOPFARM_SESSION")
-    try:
-        exit_code = run_loop(
-            cfg,
-            session_id="sess-123",
-            event_sink=event_sink,
-            io=LoopfarmIO(stdout=stdout, stderr=stderr),
-            backend_provider=backend_provider,
-        )
-    finally:
-        _restore_env("LOOPFARM_SESSION", prev_session)
+    exit_code = run_loop(
+        cfg,
+        session_id="sess-123",
+        event_sink=event_sink,
+        io=LoopfarmIO(stdout=stdout, stderr=stderr),
+        backend_provider=backend_provider,
+    )
 
     assert exit_code == 0
 

@@ -29,8 +29,9 @@ class Forum:
         cwd: Path | None = None,
         *,
         create: bool = True,
+        state_dir: Path | str | None = None,
     ) -> "Forum":
-        return cls(ForumStore.from_workdir(cwd, create=create))
+        return cls(ForumStore.from_workdir(cwd, create=create, state_dir=state_dir))
 
     def ensure_topic(self, topic: str) -> dict[str, Any]:
         return self.store.ensure_topic(topic)
@@ -231,8 +232,9 @@ def _print_help(*, output_mode: str) -> None:
                     ("--json", "emit machine-readable payloads"),
                     (
                         "--output MODE",
-                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                        "auto|plain|rich",
                     ),
+                    ("--state-dir PATH", "explicit .loopfarm state directory"),
                     ("--author <name>", "override author label for post"),
                     ("--limit <n>", "cap read/search/topic rows"),
                     ("-h, --help", "show this help"),
@@ -277,6 +279,10 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="loopfarm forum",
         description="Post, read, and search loopfarm forum messages.",
     )
+    p.add_argument(
+        "--state-dir",
+        help="Explicit .loopfarm state directory path",
+    )
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
     post = sub.add_parser("post", help="Post a message to a topic")
@@ -320,9 +326,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if raw_argv in (["-h"], ["--help"]):
+    if raw_argv and raw_argv[0] in {"-h", "--help"}:
+        help_parser = argparse.ArgumentParser(add_help=False)
+        help_parser.add_argument("--state-dir")
+        add_output_mode_argument(help_parser)
+        help_args, _unknown = help_parser.parse_known_args(raw_argv[1:])
         try:
             help_output_mode = resolve_output_mode(
+                getattr(help_args, "output", None),
                 is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
             )
         except ValueError as exc:
@@ -346,7 +357,8 @@ def main(argv: list[str] | None = None) -> None:
         create = True
     elif args.command == "topic" and args.topic_cmd == "new":
         create = True
-    forum = Forum.from_workdir(Path.cwd(), create=create)
+    state_dir = str(getattr(args, "state_dir", "") or "").strip() or None
+    forum = Forum.from_workdir(Path.cwd(), create=create, state_dir=state_dir)
 
     try:
         if args.command == "post":

@@ -48,8 +48,9 @@ class Issue:
         cwd: Path | None = None,
         *,
         create: bool = True,
+        state_dir: Path | str | None = None,
     ) -> "Issue":
-        return cls(IssueStore.from_workdir(cwd, create=create))
+        return cls(IssueStore.from_workdir(cwd, create=create, state_dir=state_dir))
 
     def list(
         self,
@@ -954,7 +955,12 @@ def _print_help(*, output_mode: str) -> None:
                     ("--json", "emit machine-stable JSON payloads"),
                     (
                         "--output MODE",
-                        "auto|plain|rich for read commands (or LOOPFARM_OUTPUT)",
+                        "auto|plain|rich for read commands",
+                    ),
+                    ("--state-dir PATH", "explicit .loopfarm state directory"),
+                    (
+                        "orchestrate-run tuning",
+                        "--control-poll-seconds/--forward-report-max-* / --max-output-*",
                     ),
                     ("-h, --help", "show this help"),
                 ),
@@ -1002,6 +1008,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="loopfarm issue",
         description="Manage loopfarm issues.",
+    )
+    p.add_argument(
+        "--state-dir",
+        help="Explicit .loopfarm state directory path",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -1131,6 +1141,67 @@ def _build_parser() -> argparse.ArgumentParser:
         "--author",
         default="orchestrator",
         help="Forum author label for execution events (default: orchestrator)",
+    )
+    orchestrate_run.add_argument(
+        "--show-reasoning",
+        action="store_true",
+        help="Show reasoning items in streamed backend output",
+    )
+    orchestrate_run.add_argument(
+        "--show-command-output",
+        action="store_true",
+        help="Always show command output in streamed backend output",
+    )
+    orchestrate_run.add_argument(
+        "--show-command-start",
+        action="store_true",
+        help="Show command start events in streamed backend output",
+    )
+    orchestrate_run.add_argument(
+        "--show-small-output",
+        action="store_true",
+        help="Show output when it fits truncation limits",
+    )
+    orchestrate_run.add_argument(
+        "--show-tokens",
+        action="store_true",
+        help="Show token usage events",
+    )
+    orchestrate_run.add_argument(
+        "--max-output-lines",
+        type=int,
+        default=60,
+        help="Maximum command output lines to render per command (default: 60)",
+    )
+    orchestrate_run.add_argument(
+        "--max-output-chars",
+        type=int,
+        default=2000,
+        help="Maximum command output chars to render per command (default: 2000)",
+    )
+    orchestrate_run.add_argument(
+        "--control-poll-seconds",
+        type=int,
+        default=5,
+        help="Control checkpoint polling interval in seconds (default: 5)",
+    )
+    orchestrate_run.add_argument(
+        "--forward-report-max-lines",
+        type=int,
+        default=20,
+        help="Maximum forward-report lines for diff/status sections (default: 20)",
+    )
+    orchestrate_run.add_argument(
+        "--forward-report-max-commits",
+        type=int,
+        default=12,
+        help="Maximum forward-report commit lines (default: 12)",
+    )
+    orchestrate_run.add_argument(
+        "--forward-report-max-summary-chars",
+        type=int,
+        default=800,
+        help="Maximum forward-report summary characters (default: 800)",
     )
     orchestrate_run.add_argument("--json", action="store_true", help="Output JSON")
     add_output_mode_argument(orchestrate_run)
@@ -1315,9 +1386,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if raw_argv in (["-h"], ["--help"]):
+    if raw_argv and raw_argv[0] in {"-h", "--help"}:
+        help_parser = argparse.ArgumentParser(add_help=False)
+        help_parser.add_argument("--state-dir")
+        add_output_mode_argument(help_parser)
+        help_args, _unknown = help_parser.parse_known_args(raw_argv[1:])
         try:
             help_output_mode = resolve_output_mode(
+                getattr(help_args, "output", None),
                 is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
             )
         except ValueError as exc:
@@ -1338,7 +1414,8 @@ def main(argv: list[str] | None = None) -> None:
     }
     if args.command == "spec" and getattr(args, "spec_cmd", None) == "show":
         create = False
-    issue = Issue.from_workdir(Path.cwd(), create=create)
+    state_dir = str(getattr(args, "state_dir", "") or "").strip() or None
+    issue = Issue.from_workdir(Path.cwd(), create=create, state_dir=state_dir)
     output_mode = "plain"
     if hasattr(args, "output"):
         try:
@@ -1414,7 +1491,7 @@ def main(argv: list[str] | None = None) -> None:
             orchestrator = IssueDagOrchestrator(
                 repo_root=Path.cwd(),
                 issue=issue,
-                forum=Forum.from_workdir(Path.cwd()),
+                forum=Forum.from_workdir(Path.cwd(), state_dir=state_dir),
                 run_topic=args.run_topic,
                 author=args.author,
                 scan_limit=max(1, int(args.scan_limit)),
@@ -1480,10 +1557,27 @@ def main(argv: list[str] | None = None) -> None:
             runner = IssueDagRunner(
                 repo_root=Path.cwd(),
                 issue=issue,
-                forum=Forum.from_workdir(Path.cwd()),
+                forum=Forum.from_workdir(Path.cwd(), state_dir=state_dir),
                 run_topic=args.run_topic,
                 author=args.author,
                 scan_limit=max(1, int(args.scan_limit)),
+                show_reasoning=bool(args.show_reasoning),
+                show_command_output=bool(args.show_command_output),
+                show_command_start=bool(args.show_command_start),
+                show_small_output=bool(args.show_small_output),
+                show_tokens=bool(args.show_tokens),
+                max_output_lines=max(1, int(args.max_output_lines)),
+                max_output_chars=max(1, int(args.max_output_chars)),
+                control_poll_seconds=max(1, int(args.control_poll_seconds)),
+                forward_report_max_lines=max(
+                    1, int(args.forward_report_max_lines)
+                ),
+                forward_report_max_commits=max(
+                    1, int(args.forward_report_max_commits)
+                ),
+                forward_report_max_summary_chars=max(
+                    1, int(args.forward_report_max_summary_chars)
+                ),
             )
             dag_run = runner.run(
                 root_id=args.root,

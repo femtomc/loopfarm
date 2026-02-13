@@ -97,8 +97,13 @@ class Sessions:
     forum: Forum
 
     @classmethod
-    def from_workdir(cls, cwd: Path | None = None) -> "Sessions":
-        return cls(Forum.from_workdir(cwd, create=False))
+    def from_workdir(
+        cls,
+        cwd: Path | None = None,
+        *,
+        state_dir: Path | str | None = None,
+    ) -> "Sessions":
+        return cls(Forum.from_workdir(cwd, create=False, state_dir=state_dir))
 
     def _session_topic_rows(self) -> list[tuple[str, dict[str, Any]]]:
         rows: list[tuple[str, dict[str, Any]]] = []
@@ -424,8 +429,9 @@ def _print_help(*, output_mode: str, prog: str) -> None:
                     ("--briefings <n>", "limit briefing entries for `show`"),
                     (
                         "--output MODE",
-                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                        "auto|plain|rich",
                     ),
+                    ("--state-dir PATH", "explicit .loopfarm state directory"),
                     ("-h, --help", "show this help"),
                 ),
             ),
@@ -470,6 +476,10 @@ def _build_parser(*, prog: str = "loopfarm sessions") -> argparse.ArgumentParser
         prog=prog,
         description="List and inspect loopfarm session history.",
     )
+    parser.add_argument(
+        "--state-dir",
+        help="Explicit .loopfarm state directory path",
+    )
     sub = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     ls = sub.add_parser("list", help="List sessions")
@@ -494,9 +504,14 @@ def _build_parser(*, prog: str = "loopfarm sessions") -> argparse.ArgumentParser
 
 def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> None:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if raw_argv in (["-h"], ["--help"]):
+    if raw_argv and raw_argv[0] in {"-h", "--help"}:
+        help_parser = argparse.ArgumentParser(add_help=False)
+        help_parser.add_argument("--state-dir")
+        add_output_mode_argument(help_parser)
+        help_args, _unknown = help_parser.parse_known_args(raw_argv[1:])
         try:
             help_output_mode = resolve_output_mode(
+                getattr(help_args, "output", None),
                 is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
             )
         except ValueError as exc:
@@ -506,7 +521,8 @@ def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> N
         raise SystemExit(0)
 
     args = _build_parser(prog=prog).parse_args(raw_argv)
-    sessions = Sessions.from_workdir(Path.cwd())
+    state_dir = str(getattr(args, "state_dir", "") or "").strip() or None
+    sessions = Sessions.from_workdir(Path.cwd(), state_dir=state_dir)
 
     output_mode = "plain"
     if hasattr(args, "output"):

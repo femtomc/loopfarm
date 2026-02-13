@@ -7,7 +7,6 @@ from typing import IO, TYPE_CHECKING
 from ..runtime.events import StreamEventSink
 from ..format_stream import CodexJsonlFormatter
 from ..summary import extract_phase_summary_from_last_message
-from ..util import env_flag, env_int
 from .base import StreamBackend
 from .stream_helpers import ensure_empty_last_message
 
@@ -74,13 +73,13 @@ class CodexBackend(StreamBackend):
             stderr=stderr,
             repo_root=cfg.repo_root,
             event_sink=event_sink,
-            show_reasoning=bool(env_flag("LOOPFARM_SHOW_REASONING")),
-            show_command_output=env_flag("LOOPFARM_SHOW_COMMAND_OUTPUT"),
-            show_command_start=env_flag("LOOPFARM_SHOW_COMMAND_START"),
-            show_small_output=env_flag("LOOPFARM_SHOW_SMALL_OUTPUT"),
-            show_tokens=env_flag("LOOPFARM_SHOW_TOKENS"),
-            max_output_lines=env_int("LOOPFARM_MAX_OUTPUT_LINES", 60),
-            max_output_chars=env_int("LOOPFARM_MAX_OUTPUT_CHARS", 2000),
+            show_reasoning=bool(cfg.show_reasoning),
+            show_command_output=bool(cfg.show_command_output),
+            show_command_start=bool(cfg.show_command_start),
+            show_small_output=bool(cfg.show_small_output),
+            show_tokens=bool(cfg.show_tokens),
+            max_output_lines=max(1, int(cfg.max_output_lines)),
+            max_output_chars=max(1, int(cfg.max_output_chars)),
         )
 
     def extract_summary(

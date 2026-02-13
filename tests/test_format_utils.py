@@ -14,7 +14,6 @@ from loopfarm.format_stream import (
     _trim_text,
     _truncate_text,
 )
-from loopfarm.util import env_flag, env_int
 
 
 # -- _shorten_path -----------------------------------------------------------
@@ -64,42 +63,6 @@ class TestInlineText:
     def test_truncated(self) -> None:
         result = _inline_text("a" * 200, 10)
         assert len(result) == 10
-
-
-# -- env_flag ----------------------------------------------------------------
-
-
-class TestEnvFlag:
-    def test_true_values(self, monkeypatch: object) -> None:
-        for val in ("1", "true", "YES", "on"):
-            monkeypatch.setenv("TEST_FLAG", val)  # type: ignore[attr-defined]
-            assert env_flag("TEST_FLAG") is True
-
-    def test_false_values(self, monkeypatch: object) -> None:
-        for val in ("0", "false", "no", "off", ""):
-            monkeypatch.setenv("TEST_FLAG", val)  # type: ignore[attr-defined]
-            assert env_flag("TEST_FLAG") is False
-
-    def test_missing(self, monkeypatch: object) -> None:
-        monkeypatch.delenv("TEST_FLAG", raising=False)  # type: ignore[attr-defined]
-        assert env_flag("TEST_FLAG") is False
-
-
-# -- env_int -----------------------------------------------------------------
-
-
-class TestEnvInt:
-    def test_valid(self, monkeypatch: object) -> None:
-        monkeypatch.setenv("TEST_INT", "42")  # type: ignore[attr-defined]
-        assert env_int("TEST_INT", 0) == 42
-
-    def test_invalid_fallback(self, monkeypatch: object) -> None:
-        monkeypatch.setenv("TEST_INT", "nope")  # type: ignore[attr-defined]
-        assert env_int("TEST_INT", 7) == 7
-
-    def test_missing(self, monkeypatch: object) -> None:
-        monkeypatch.delenv("TEST_INT", raising=False)  # type: ignore[attr-defined]
-        assert env_int("TEST_INT", 99) == 99
 
 
 # -- _shorten_shell_command --------------------------------------------------

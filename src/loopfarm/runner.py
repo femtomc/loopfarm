@@ -60,6 +60,17 @@ class LoopfarmConfig:
     phase_cli_overrides: tuple[tuple[str, str], ...] = ()
     phase_prompt_overrides: tuple[tuple[str, str], ...] = ()
     phase_injections: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    show_reasoning: bool = False
+    show_command_output: bool = False
+    show_command_start: bool = False
+    show_small_output: bool = False
+    show_tokens: bool = False
+    max_output_lines: int = 60
+    max_output_chars: int = 2000
+    control_poll_seconds: int = 5
+    forward_report_max_lines: int = 20
+    forward_report_max_commits: int = 12
+    forward_report_max_summary_chars: int = 800
 
     def phase_model(self, phase: str) -> CodexPhaseModel | None:
         for name, model in self.phase_models:
@@ -99,9 +110,16 @@ class LoopfarmRunner:
         self.stderr = io.stderr if io and io.stderr else sys.stderr
         self.forum = Forum.from_workdir(cfg.repo_root)
         self.session_store = SessionStore(self.forum)
-        self.control_plane = ControlPlane(self.session_store)
+        self.control_plane = ControlPlane(
+            self.session_store,
+            poll_seconds=max(1, int(cfg.control_poll_seconds)),
+        )
         self.forward_reports = ForwardReportService(
-            repo_root=cfg.repo_root, forum=self.forum
+            repo_root=cfg.repo_root,
+            forum=self.forum,
+            max_lines=max(1, int(cfg.forward_report_max_lines)),
+            max_commits=max(1, int(cfg.forward_report_max_commits)),
+            max_summary_chars=max(1, int(cfg.forward_report_max_summary_chars)),
         )
         self.prompt_resolver = PromptResolver(self.cfg, self.session_store)
         self.phase_executor = PhaseExecutor(
@@ -188,8 +206,6 @@ class LoopfarmRunner:
         start_time = utc_now_iso()
         self.start_monotonic = time.monotonic()
         self.session_id = session_id
-
-        os.environ["LOOPFARM_SESSION"] = session_id
 
         self.session_store.update_session_meta(
             session_id,

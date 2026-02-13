@@ -310,7 +310,7 @@ def _print_help(*, output_mode: str) -> None:
                     ("--json", "emit machine-stable JSON payloads"),
                     (
                         "--output MODE",
-                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                        "auto|plain|rich",
                     ),
                     ("--topic <topic>", "restrict search to one topic"),
                     ("--limit <n>", "cap search results (default: 20)"),
@@ -446,9 +446,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if raw_argv in (["-h"], ["--help"]):
+    if raw_argv and raw_argv[0] in {"-h", "--help"}:
+        help_parser = argparse.ArgumentParser(add_help=False)
+        add_output_mode_argument(help_parser)
+        help_args, _unknown = help_parser.parse_known_args(raw_argv[1:])
         try:
             help_output_mode = resolve_output_mode(
+                getattr(help_args, "output", None),
                 is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
             )
         except ValueError as exc:

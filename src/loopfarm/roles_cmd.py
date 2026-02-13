@@ -134,8 +134,9 @@ def _print_help(*, output_mode: str) -> None:
                     ("--json", "emit machine-stable JSON output"),
                     (
                         "--output MODE",
-                        "auto|plain|rich for list/show (or LOOPFARM_OUTPUT)",
+                        "auto|plain|rich for list/show",
                     ),
+                    ("--state-dir PATH", "explicit .loopfarm state directory"),
                     ("--team <name>", "team label written as team:<name> tag (assign)"),
                     ("--lead <role>", "lead role written as role:<lead> tag (assign)"),
                     ("--role <role>", "additional role member (repeatable) (assign)"),
@@ -164,6 +165,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="loopfarm roles",
         description="Discover roles and manage issue team assembly metadata.",
+    )
+    parser.add_argument(
+        "--state-dir",
+        help="Explicit .loopfarm state directory path",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -281,7 +286,12 @@ def _build_execution_spec_from_role(
     return normalize_execution_spec_payload(payload)
 
 
-def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str, object]:
+def _assign_issue_team(
+    args: argparse.Namespace,
+    *,
+    repo_root: Path,
+    state_dir: Path | None = None,
+) -> dict[str, object]:
     issue_id = str(args.issue_id or "").strip()
     if not issue_id:
         raise ValueError("issue_id is required")
@@ -307,7 +317,7 @@ def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str
         seen.add(role)
         ordered_roles.append(role)
 
-    issue = Issue.from_workdir(repo_root, create=True)
+    issue = Issue.from_workdir(repo_root, create=True, state_dir=state_dir)
     existing = issue.show(issue_id)
     if existing is None:
         raise ValueError(f"issue not found: {issue_id}")
@@ -344,7 +354,7 @@ def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str
         execution_spec=execution_spec,
     )
 
-    forum = Forum.from_workdir(repo_root)
+    forum = Forum.from_workdir(repo_root, state_dir=state_dir)
     forum.post_json(f"issue:{issue_id}", payload, author=args.author)
     forum.post_json(str(args.run_topic), payload, author=args.author)
 
@@ -365,9 +375,14 @@ def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if raw_argv in (["-h"], ["--help"]):
+    if raw_argv and raw_argv[0] in {"-h", "--help"}:
+        help_parser = argparse.ArgumentParser(add_help=False)
+        help_parser.add_argument("--state-dir")
+        add_output_mode_argument(help_parser)
+        help_args, _unknown = help_parser.parse_known_args(raw_argv[1:])
         try:
             output_mode = resolve_output_mode(
+                getattr(help_args, "output", None),
                 is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
             )
         except ValueError as exc:
@@ -378,6 +393,10 @@ def main(argv: list[str] | None = None) -> None:
 
     args = _build_parser().parse_args(raw_argv)
     repo_root = Path.cwd()
+    state_dir = str(getattr(args, "state_dir", "") or "").strip()
+    resolved_state_dir = (
+        Path(state_dir).expanduser().resolve() if state_dir else None
+    )
 
     try:
         output_mode = _resolve_output_mode(args)
@@ -414,7 +433,11 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         if args.command == "assign":
-            result = _assign_issue_team(args, repo_root=repo_root)
+            result = _assign_issue_team(
+                args,
+                repo_root=repo_root,
+                state_dir=resolved_state_dir,
+            )
             if args.json:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
             else:

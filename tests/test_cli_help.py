@@ -3,18 +3,16 @@ from __future__ import annotations
 import pytest
 
 from loopfarm import cli
-from loopfarm.ui import OUTPUT_ENV_VAR
 
 
 def test_main_help_rich_includes_quick_start_and_docs(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv(OUTPUT_ENV_VAR, "rich")
     monkeypatch.setenv("COLUMNS", "200")
 
     with pytest.raises(SystemExit) as raised:
-        cli.main(["--help"])
+        cli.main(["--help", "--output", "rich"])
 
     captured = capsys.readouterr()
     out = captured.out + captured.err
@@ -70,11 +68,10 @@ def test_command_help_rich_has_consistent_sections(
     argv: list[str],
     needles: tuple[str, ...],
 ) -> None:
-    monkeypatch.setenv(OUTPUT_ENV_VAR, "rich")
     monkeypatch.setenv("COLUMNS", "200")
 
     with pytest.raises(SystemExit) as raised:
-        cli.main(argv)
+        cli.main(["--output", "rich", *argv])
 
     captured = capsys.readouterr()
     out = captured.out + captured.err
@@ -87,10 +84,8 @@ def test_issue_help_plain_has_sections_without_ansi(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv(OUTPUT_ENV_VAR, "plain")
-
     with pytest.raises(SystemExit) as raised:
-        cli.main(["issue", "--help"])
+        cli.main(["--output", "plain", "issue", "--help"])
 
     captured = capsys.readouterr()
     out = captured.out + captured.err
@@ -153,18 +148,16 @@ def test_help_plain_and_rich_share_core_contract(
     argv: list[str],
     needles: tuple[str, ...],
 ) -> None:
-    monkeypatch.setenv(OUTPUT_ENV_VAR, "plain")
     with pytest.raises(SystemExit) as raised:
-        cli.main(argv)
+        cli.main(["--output", "plain", *argv])
     captured = capsys.readouterr()
     plain = captured.out + captured.err
     assert raised.value.code == 0
     assert "\x1b[" not in plain
 
-    monkeypatch.setenv(OUTPUT_ENV_VAR, "rich")
     monkeypatch.setenv("COLUMNS", "200")
     with pytest.raises(SystemExit) as raised:
-        cli.main(argv)
+        cli.main(["--output", "rich", *argv])
     captured = capsys.readouterr()
     rich = captured.out + captured.err
     assert raised.value.code == 0

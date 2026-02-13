@@ -75,6 +75,17 @@ class IssueDagRunner:
         roles: RoleCatalog | None = None,
         orchestrator: IssueDagOrchestrator | None = None,
         executor: IssueDagNodeExecutionAdapter | None = None,
+        show_reasoning: bool = False,
+        show_command_output: bool = False,
+        show_command_start: bool = False,
+        show_small_output: bool = False,
+        show_tokens: bool = False,
+        max_output_lines: int = 60,
+        max_output_chars: int = 2000,
+        control_poll_seconds: int = 5,
+        forward_report_max_lines: int = 20,
+        forward_report_max_commits: int = 12,
+        forward_report_max_summary_chars: int = 800,
     ) -> None:
         self.repo_root = repo_root
         self.issue = issue
@@ -93,6 +104,17 @@ class IssueDagRunner:
             forum=forum,
             run_topic=run_topic,
             author=author,
+            show_reasoning=show_reasoning,
+            show_command_output=show_command_output,
+            show_command_start=show_command_start,
+            show_small_output=show_small_output,
+            show_tokens=show_tokens,
+            max_output_lines=max_output_lines,
+            max_output_chars=max_output_chars,
+            control_poll_seconds=control_poll_seconds,
+            forward_report_max_lines=forward_report_max_lines,
+            forward_report_max_commits=forward_report_max_commits,
+            forward_report_max_summary_chars=forward_report_max_summary_chars,
         )
 
     def run(

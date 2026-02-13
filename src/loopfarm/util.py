@@ -70,36 +70,6 @@ def which(cmd: str) -> str | None:
             return str(candidate)
     return None
 
-
-def _env_names(name: str) -> tuple[str, ...]:
-    return (name,)
-
-
-def env_value(name: str) -> str | None:
-    for candidate in _env_names(name):
-        raw = os.environ.get(candidate)
-        if raw is not None:
-            return raw
-    return None
-
-
-def env_flag(name: str) -> bool:
-    raw = env_value(name)
-    if raw is None:
-        return False
-    return raw.strip().lower() not in {"", "0", "false", "no", "off"}
-
-
-def env_int(name: str, default: int) -> int:
-    raw = env_value(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
 def eprint(*parts: object) -> None:
     print(*parts, file=sys.stderr)
 

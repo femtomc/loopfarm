@@ -91,6 +91,18 @@ def _print_help(*, output_mode: str) -> None:
                         "--full-maintenance",
                         "run full subtree reconcile/validate after each step",
                     ),
+                    (
+                        "--control-poll-seconds N",
+                        "control checkpoint poll interval (default: 5)",
+                    ),
+                    (
+                        "--forward-report-max-lines N",
+                        "forward report line cap (default: 20)",
+                    ),
+                    (
+                        "--max-output-lines N",
+                        "streamed command output line cap (default: 60)",
+                    ),
                     ("--json", "emit machine-stable JSON result payload"),
                 ),
             ),
@@ -99,7 +111,11 @@ def _print_help(*, output_mode: str) -> None:
                 (
                     (
                         "--output MODE",
-                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                        "auto|plain|rich",
+                    ),
+                    (
+                        "--state-dir PATH",
+                        "explicit .loopfarm state directory for subcommands/prompt mode",
                     ),
                     ("--version", "print installed loopfarm version"),
                     ("-h, --help", "show this help"),
@@ -149,6 +165,76 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scan-limit", type=int, default=20)
     parser.add_argument("--resume-mode", choices=("manual", "resume"), default="manual")
     parser.add_argument("--full-maintenance", action="store_true", default=False)
+    parser.add_argument(
+        "--state-dir",
+        help="Explicit .loopfarm state directory path",
+    )
+    parser.add_argument(
+        "--show-reasoning",
+        action="store_true",
+        default=False,
+        help="Show reasoning items in streamed backend output",
+    )
+    parser.add_argument(
+        "--show-command-output",
+        action="store_true",
+        default=False,
+        help="Always show command output in streamed backend output",
+    )
+    parser.add_argument(
+        "--show-command-start",
+        action="store_true",
+        default=False,
+        help="Show command start events in streamed backend output",
+    )
+    parser.add_argument(
+        "--show-small-output",
+        action="store_true",
+        default=False,
+        help="Show output when it fits truncation limits",
+    )
+    parser.add_argument(
+        "--show-tokens",
+        action="store_true",
+        default=False,
+        help="Show token usage events",
+    )
+    parser.add_argument(
+        "--max-output-lines",
+        type=int,
+        default=60,
+        help="Maximum command output lines to render per command",
+    )
+    parser.add_argument(
+        "--max-output-chars",
+        type=int,
+        default=2000,
+        help="Maximum command output chars to render per command",
+    )
+    parser.add_argument(
+        "--control-poll-seconds",
+        type=int,
+        default=5,
+        help="Control checkpoint polling interval in seconds",
+    )
+    parser.add_argument(
+        "--forward-report-max-lines",
+        type=int,
+        default=20,
+        help="Maximum forward-report lines for diff/status sections",
+    )
+    parser.add_argument(
+        "--forward-report-max-commits",
+        type=int,
+        default=12,
+        help="Maximum forward-report commit lines",
+    )
+    parser.add_argument(
+        "--forward-report-max-summary-chars",
+        type=int,
+        default=800,
+        help="Maximum forward-report summary characters",
+    )
     add_output_mode_argument(parser)
     parser.add_argument("command", nargs="?")
     parser.add_argument("args", nargs=argparse.REMAINDER)
@@ -174,13 +260,30 @@ def _run_prompt_mode(
     scan_limit: int,
     resume_mode: str,
     full_maintenance: bool,
+    state_dir: str | None,
+    show_reasoning: bool,
+    show_command_output: bool,
+    show_command_start: bool,
+    show_small_output: bool,
+    show_tokens: bool,
+    max_output_lines: int,
+    max_output_chars: int,
+    control_poll_seconds: int,
+    forward_report_max_lines: int,
+    forward_report_max_commits: int,
+    forward_report_max_summary_chars: int,
 ) -> None:
     from .forum import Forum
     from .issue import Issue
     from .runtime.issue_dag_runner import IssueDagRunner
 
     repo_root = Path.cwd()
-    issue = Issue.from_workdir(repo_root, create=True)
+    resolved_state_dir = state_dir.strip() if state_dir else ""
+    issue = Issue.from_workdir(
+        repo_root,
+        create=True,
+        state_dir=resolved_state_dir or None,
+    )
     root = issue.create(
         _prompt_title(prompt),
         body=prompt,
@@ -190,8 +293,24 @@ def _run_prompt_mode(
     runner = IssueDagRunner(
         repo_root=repo_root,
         issue=issue,
-        forum=Forum.from_workdir(repo_root),
+        forum=Forum.from_workdir(
+            repo_root,
+            state_dir=resolved_state_dir or None,
+        ),
         scan_limit=max(1, int(scan_limit)),
+        show_reasoning=bool(show_reasoning),
+        show_command_output=bool(show_command_output),
+        show_command_start=bool(show_command_start),
+        show_small_output=bool(show_small_output),
+        show_tokens=bool(show_tokens),
+        max_output_lines=max(1, int(max_output_lines)),
+        max_output_chars=max(1, int(max_output_chars)),
+        control_poll_seconds=max(1, int(control_poll_seconds)),
+        forward_report_max_lines=max(1, int(forward_report_max_lines)),
+        forward_report_max_commits=max(1, int(forward_report_max_commits)),
+        forward_report_max_summary_chars=max(
+            1, int(forward_report_max_summary_chars)
+        ),
     )
 
     root_id = str(root["id"])
@@ -293,6 +412,15 @@ def main(argv: list[str] | None = None) -> None:
 
     command = str(args.command or "").strip()
     sub_argv = list(args.args or [])
+
+    def _with_shared_options(argv_in: list[str]) -> list[str]:
+        argv_out = list(argv_in)
+        if args.state_dir:
+            argv_out = ["--state-dir", str(args.state_dir), *argv_out]
+        if args.output and argv_out and argv_out[0] in {"-h", "--help"}:
+            if "--output" not in argv_out:
+                argv_out = [*argv_out, "--output", str(args.output)]
+        return argv_out
     if not command:
         _print_help(output_mode=output_mode)
         raise SystemExit(0)
@@ -300,7 +428,7 @@ def main(argv: list[str] | None = None) -> None:
     if command == "forum":
         from .forum import main as forum_main
 
-        forum_main(sub_argv)
+        forum_main(_with_shared_options(sub_argv))
         return
     if command == "init":
         from .init_cmd import main as init_main
@@ -310,12 +438,12 @@ def main(argv: list[str] | None = None) -> None:
     if command == "issue":
         from .issue import main as issue_main
 
-        issue_main(sub_argv)
+        issue_main(_with_shared_options(sub_argv))
         return
     if command == "roles":
         from .roles_cmd import main as roles_main
 
-        roles_main(sub_argv)
+        roles_main(_with_shared_options(sub_argv))
         return
     if command == "docs":
         from .docs_cmd import main as docs_main
@@ -325,18 +453,30 @@ def main(argv: list[str] | None = None) -> None:
     if command == "sessions":
         from .sessions import main as sessions_main
 
-        sessions_main(sub_argv or ["list"], prog="loopfarm sessions")
+        sessions_main(
+            _with_shared_options(sub_argv or ["list"]),
+            prog="loopfarm sessions",
+        )
         return
     if command == "history":
         from .sessions import main as sessions_main
 
         if sub_argv and sub_argv[0] in {"-h", "--help"}:
-            sessions_main(["--help"], prog="loopfarm history")
+            sessions_main(
+                _with_shared_options(["--help"]),
+                prog="loopfarm history",
+            )
             return
         if sub_argv and sub_argv[0] in {"list", "show"}:
-            sessions_main(sub_argv, prog="loopfarm history")
+            sessions_main(
+                _with_shared_options(sub_argv),
+                prog="loopfarm history",
+            )
         else:
-            sessions_main(["list", *sub_argv], prog="loopfarm history")
+            sessions_main(
+                _with_shared_options(["list", *sub_argv]),
+                prog="loopfarm history",
+            )
         return
 
     prompt = " ".join([command, *sub_argv]).strip()
@@ -354,6 +494,20 @@ def main(argv: list[str] | None = None) -> None:
             scan_limit=max(1, int(args.scan_limit)),
             resume_mode=str(args.resume_mode),
             full_maintenance=bool(args.full_maintenance),
+            state_dir=str(args.state_dir or ""),
+            show_reasoning=bool(args.show_reasoning),
+            show_command_output=bool(args.show_command_output),
+            show_command_start=bool(args.show_command_start),
+            show_small_output=bool(args.show_small_output),
+            show_tokens=bool(args.show_tokens),
+            max_output_lines=max(1, int(args.max_output_lines)),
+            max_output_chars=max(1, int(args.max_output_chars)),
+            control_poll_seconds=max(1, int(args.control_poll_seconds)),
+            forward_report_max_lines=max(1, int(args.forward_report_max_lines)),
+            forward_report_max_commits=max(1, int(args.forward_report_max_commits)),
+            forward_report_max_summary_chars=max(
+                1, int(args.forward_report_max_summary_chars)
+            ),
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)

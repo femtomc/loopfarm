@@ -19,7 +19,6 @@ from rich.table import Table
 from rich.text import Text
 
 from .runtime.events import StreamEventSink
-from .util import env_flag, env_int
 
 
 def _shorten_path(path: str, repo_root: Path | None) -> str:
@@ -766,38 +765,28 @@ def main(argv: list[str] | None = None, stdin: IO[str] | None = None) -> None:
         help="Show Codex token usage on turn completion",
     )
     p.add_argument(
-        "--max-output-lines", type=int, help="Max lines of Codex command output to show"
+        "--max-output-lines",
+        type=int,
+        default=60,
+        help="Max lines of Codex command output to show (default: 60)",
     )
     p.add_argument(
-        "--max-output-chars", type=int, help="Max chars of Codex command output to show"
+        "--max-output-chars",
+        type=int,
+        default=2000,
+        help="Max chars of Codex command output to show (default: 2000)",
     )
     args = p.parse_args(argv)
 
     repo_root: Path | None = Path(args.repo_root) if args.repo_root else Path.cwd()
 
-    show_reasoning = bool(args.show_reasoning) or bool(
-        env_flag("LOOPFARM_SHOW_REASONING")
-    )
-    show_command_output = bool(args.show_command_output) or env_flag(
-        "LOOPFARM_SHOW_COMMAND_OUTPUT"
-    )
-    show_command_start = bool(args.show_command_start) or env_flag(
-        "LOOPFARM_SHOW_COMMAND_START"
-    )
-    show_small_output = bool(args.show_small_output) or env_flag(
-        "LOOPFARM_SHOW_SMALL_OUTPUT"
-    )
-    show_tokens = bool(args.show_tokens) or env_flag("LOOPFARM_SHOW_TOKENS")
-    max_output_lines = (
-        args.max_output_lines
-        if args.max_output_lines is not None
-        else env_int("LOOPFARM_MAX_OUTPUT_LINES", 60)
-    )
-    max_output_chars = (
-        args.max_output_chars
-        if args.max_output_chars is not None
-        else env_int("LOOPFARM_MAX_OUTPUT_CHARS", 2000)
-    )
+    show_reasoning = bool(args.show_reasoning)
+    show_command_output = bool(args.show_command_output)
+    show_command_start = bool(args.show_command_start)
+    show_small_output = bool(args.show_small_output)
+    show_tokens = bool(args.show_tokens)
+    max_output_lines = max(1, int(args.max_output_lines))
+    max_output_chars = max(1, int(args.max_output_chars))
 
     inp = sys.stdin if stdin is None else stdin
 

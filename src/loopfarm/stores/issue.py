@@ -228,9 +228,10 @@ class IssueStore:
         cwd: Path | None = None,
         *,
         create: bool = True,
+        state_dir: Path | str | None = None,
     ) -> "IssueStore":
         return cls(
-            resolve_state_dir(cwd, create=create),
+            resolve_state_dir(cwd, create=create, state_dir=state_dir),
             create_on_connect=create,
         )
 

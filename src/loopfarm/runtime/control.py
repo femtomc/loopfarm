@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ..stores.session import SessionStore
-from ..util import env_int, utc_now_iso
+from ..util import utc_now_iso
 
 
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -23,8 +23,9 @@ class ControlCheckpointResult:
 
 
 class ControlPlane:
-    def __init__(self, session_store: SessionStore) -> None:
+    def __init__(self, session_store: SessionStore, *, poll_seconds: int = 5) -> None:
         self.session_store = session_store
+        self.poll_seconds = max(1, int(poll_seconds))
 
     def load_session_context_override(self, session_id: str) -> str:
         meta = self.session_store.get_session_meta(session_id) or {}
@@ -191,9 +192,8 @@ class ControlPlane:
                     stop_requested=True,
                 )
 
-        poll_seconds = max(1, env_int("LOOPFARM_CONTROL_POLL_SECONDS", 5))
         while paused:
-            sleep(poll_seconds)
+            sleep(self.poll_seconds)
             state, current_signature = self.read_control_state(
                 session_id, last_signature=current_signature
             )

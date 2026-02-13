@@ -22,6 +22,17 @@ ROLE_PHASE = "role"
 DEFAULT_ORCHESTRATOR_CLI = "codex"
 DEFAULT_ORCHESTRATOR_MODEL = "gpt-5.2"
 DEFAULT_ORCHESTRATOR_REASONING = "xhigh"
+DEFAULT_SHOW_REASONING = False
+DEFAULT_SHOW_COMMAND_OUTPUT = False
+DEFAULT_SHOW_COMMAND_START = False
+DEFAULT_SHOW_SMALL_OUTPUT = False
+DEFAULT_SHOW_TOKENS = False
+DEFAULT_MAX_OUTPUT_LINES = 60
+DEFAULT_MAX_OUTPUT_CHARS = 2000
+DEFAULT_CONTROL_POLL_SECONDS = 5
+DEFAULT_FORWARD_REPORT_MAX_LINES = 20
+DEFAULT_FORWARD_REPORT_MAX_COMMITS = 12
+DEFAULT_FORWARD_REPORT_MAX_SUMMARY_CHARS = 800
 DEFAULT_SELECTION_TEAM = "dynamic"
 ROUTE_SPEC_EXECUTION = "spec_execution"
 ROUTE_ORCHESTRATOR_PLANNING = "orchestrator_planning"
@@ -121,6 +132,17 @@ class IssueDagNodeExecutionAdapter:
         author: str = "orchestrator",
         run_session: RunSelectionSessionFn | None = None,
         session_id_factory: Callable[[], str] = new_session_id,
+        show_reasoning: bool = DEFAULT_SHOW_REASONING,
+        show_command_output: bool = DEFAULT_SHOW_COMMAND_OUTPUT,
+        show_command_start: bool = DEFAULT_SHOW_COMMAND_START,
+        show_small_output: bool = DEFAULT_SHOW_SMALL_OUTPUT,
+        show_tokens: bool = DEFAULT_SHOW_TOKENS,
+        max_output_lines: int = DEFAULT_MAX_OUTPUT_LINES,
+        max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
+        control_poll_seconds: int = DEFAULT_CONTROL_POLL_SECONDS,
+        forward_report_max_lines: int = DEFAULT_FORWARD_REPORT_MAX_LINES,
+        forward_report_max_commits: int = DEFAULT_FORWARD_REPORT_MAX_COMMITS,
+        forward_report_max_summary_chars: int = DEFAULT_FORWARD_REPORT_MAX_SUMMARY_CHARS,
     ) -> None:
         self.repo_root = repo_root
         self.issue = issue
@@ -130,6 +152,19 @@ class IssueDagNodeExecutionAdapter:
         self._run_session = run_session or self._default_run_session
         self._session_id_factory = session_id_factory
         self._session_store = SessionStore(forum)
+        self.show_reasoning = bool(show_reasoning)
+        self.show_command_output = bool(show_command_output)
+        self.show_command_start = bool(show_command_start)
+        self.show_small_output = bool(show_small_output)
+        self.show_tokens = bool(show_tokens)
+        self.max_output_lines = max(1, int(max_output_lines))
+        self.max_output_chars = max(1, int(max_output_chars))
+        self.control_poll_seconds = max(1, int(control_poll_seconds))
+        self.forward_report_max_lines = max(1, int(forward_report_max_lines))
+        self.forward_report_max_commits = max(1, int(forward_report_max_commits))
+        self.forward_report_max_summary_chars = max(
+            1, int(forward_report_max_summary_chars)
+        )
 
     def execute_selection(
         self,
@@ -446,6 +481,7 @@ class IssueDagNodeExecutionAdapter:
             phase_prompt_overrides=tuple(
                 (phase, str(prompt_path)) for phase in ordered_phases
             ),
+            **self._loopfarm_config_kwargs(),
         )
 
     def _build_spec_loop_config(
@@ -503,7 +539,23 @@ class IssueDagNodeExecutionAdapter:
             phase_models=tuple(phase_models),
             phase_cli_overrides=tuple(phase_cli_overrides),
             phase_prompt_overrides=tuple(phase_prompt_overrides),
+            **self._loopfarm_config_kwargs(),
         )
+
+    def _loopfarm_config_kwargs(self) -> dict[str, Any]:
+        return {
+            "show_reasoning": self.show_reasoning,
+            "show_command_output": self.show_command_output,
+            "show_command_start": self.show_command_start,
+            "show_small_output": self.show_small_output,
+            "show_tokens": self.show_tokens,
+            "max_output_lines": self.max_output_lines,
+            "max_output_chars": self.max_output_chars,
+            "control_poll_seconds": self.control_poll_seconds,
+            "forward_report_max_lines": self.forward_report_max_lines,
+            "forward_report_max_commits": self.forward_report_max_commits,
+            "forward_report_max_summary_chars": self.forward_report_max_summary_chars,
+        }
 
     def _build_issue_prompt(self, issue: dict[str, Any]) -> str:
         issue_id = str(issue.get("id") or "").strip() or "unknown"

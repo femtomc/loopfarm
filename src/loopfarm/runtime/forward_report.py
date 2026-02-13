@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ..forum import Forum
-from ..util import CommandError, env_int, run_capture, utc_now_iso
+from ..util import CommandError, run_capture, utc_now_iso
 
 
 def _truncate_lines(lines: list[str], max_lines: int) -> list[str]:
@@ -30,9 +30,20 @@ def _truncate_text(text: str, max_chars: int) -> str:
 
 
 class ForwardReportService:
-    def __init__(self, *, repo_root: Path, forum: Forum) -> None:
+    def __init__(
+        self,
+        *,
+        repo_root: Path,
+        forum: Forum,
+        max_lines: int = 20,
+        max_commits: int = 12,
+        max_summary_chars: int = 800,
+    ) -> None:
         self.repo_root = repo_root
         self.forum = forum
+        self.max_lines = max(1, int(max_lines))
+        self.max_commits = max(1, int(max_commits))
+        self.max_summary_chars = max(1, int(max_summary_chars))
 
     def git_capture(self, argv: list[str]) -> str:
         try:
@@ -52,10 +63,6 @@ class ForwardReportService:
     def build_forward_report(
         self, *, session_id: str, pre_head: str, post_head: str, summary: str
     ) -> dict[str, Any]:
-        max_lines = env_int("LOOPFARM_FORWARD_REPORT_MAX_LINES", 20)
-        max_commits = env_int("LOOPFARM_FORWARD_REPORT_MAX_COMMITS", 12)
-        max_summary_chars = env_int("LOOPFARM_FORWARD_REPORT_MAX_SUMMARY_CHARS", 800)
-
         head_changed = bool(pre_head and post_head and pre_head != post_head)
         commit_range = f"{pre_head}..{post_head}" if head_changed else ""
 
@@ -66,7 +73,7 @@ class ForwardReportService:
                     "--no-pager",
                     "log",
                     "--oneline",
-                    f"--max-count={max_commits}",
+                    f"--max-count={self.max_commits}",
                     commit_range,
                 ]
             )
@@ -132,16 +139,16 @@ class ForwardReportService:
             "post_head": post_head,
             "head_changed": head_changed,
             "commit_range": commit_range,
-            "commits": _truncate_lines(commits, max_commits),
-            "diffstat": _truncate_lines(diffstat, max_lines),
-            "name_status": _truncate_lines(name_status, max_lines),
+            "commits": _truncate_lines(commits, self.max_commits),
+            "diffstat": _truncate_lines(diffstat, self.max_lines),
+            "name_status": _truncate_lines(name_status, self.max_lines),
             "dirty": dirty,
-            "status": _truncate_lines(status_lines, max_lines),
-            "staged_diffstat": _truncate_lines(staged_diffstat, max_lines),
-            "unstaged_diffstat": _truncate_lines(unstaged_diffstat, max_lines),
-            "staged_name_status": _truncate_lines(staged_name_status, max_lines),
-            "unstaged_name_status": _truncate_lines(unstaged_name_status, max_lines),
-            "summary": _truncate_text(summary, max_summary_chars),
+            "status": _truncate_lines(status_lines, self.max_lines),
+            "staged_diffstat": _truncate_lines(staged_diffstat, self.max_lines),
+            "unstaged_diffstat": _truncate_lines(unstaged_diffstat, self.max_lines),
+            "staged_name_status": _truncate_lines(staged_name_status, self.max_lines),
+            "unstaged_name_status": _truncate_lines(unstaged_name_status, self.max_lines),
+            "summary": _truncate_text(summary, self.max_summary_chars),
         }
 
     def post_forward_report(self, session_id: str, payload: dict[str, Any]) -> None:

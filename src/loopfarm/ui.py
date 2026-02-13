@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Literal, TextIO
 
 from rich.console import Console
@@ -11,7 +10,6 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
-OUTPUT_ENV_VAR = "LOOPFARM_OUTPUT"
 OUTPUT_CHOICES = ("auto", "plain", "rich")
 OutputMode = Literal["plain", "rich"]
 
@@ -21,8 +19,7 @@ def add_output_mode_argument(parser: argparse.ArgumentParser) -> None:
         "--output",
         choices=OUTPUT_CHOICES,
         help=(
-            "Output mode: auto (default), plain, or rich. "
-            f"Can also be set with {OUTPUT_ENV_VAR}."
+            "Output mode: auto (default), plain, or rich."
         ),
     )
 
@@ -52,15 +49,9 @@ def _stream_is_tty(stream: object) -> bool:
 def resolve_output_mode(
     requested: str | None = None,
     *,
-    env: Mapping[str, str] | None = None,
     is_tty: bool | None = None,
 ) -> OutputMode:
     selected = _normalize_choice(requested, source="--output")
-    if selected is None:
-        source_env = os.environ if env is None else env
-        selected = _normalize_choice(
-            source_env.get(OUTPUT_ENV_VAR), source=OUTPUT_ENV_VAR
-        )
     if selected is None:
         selected = "auto"
 

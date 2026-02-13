@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
@@ -71,13 +71,13 @@ class DagRunner:
             self.store.claim(issue_id)
 
             # 4. Route: determine backend, model, prompt
-            # Priority: execution_spec > orchestrator.md frontmatter > hardcoded fallbacks
+            # 3-tier priority: execution_spec fields > role frontmatter > orchestrator.md > fallbacks
             cli = self._FALLBACK_CLI
             model = self._FALLBACK_MODEL
             reasoning = self._FALLBACK_REASONING
             prompt_path: str | None = None
 
-            # Read orchestrator defaults first (lowest priority override)
+            # Tier 1: orchestrator.md frontmatter (global defaults)
             orchestrator = self.repo_root / ".loopfarm" / "orchestrator.md"
             if orchestrator.exists():
                 meta = read_prompt_meta(orchestrator)
@@ -86,20 +86,36 @@ class DagRunner:
                 reasoning = meta.get("reasoning", reasoning)
                 prompt_path = str(orchestrator)
 
-            # execution_spec overrides everything
+            # Parse execution_spec (may set role + explicit fields)
+            spec: ExecutionSpec | None = None
             if issue.get("execution_spec"):
                 spec = ExecutionSpec.from_dict(
                     issue["execution_spec"], self.repo_root
                 )
-                cli = spec.cli
-                model = spec.model
-                reasoning = spec.reasoning
+
+            # Tier 2: role file frontmatter (role-specific defaults)
+            if spec and spec.role:
+                role_path = self.repo_root / ".loopfarm" / "roles" / f"{spec.role}.md"
+                if role_path.exists():
+                    role_meta = read_prompt_meta(role_path)
+                    cli = role_meta.get("cli", cli)
+                    model = role_meta.get("model", model)
+                    reasoning = role_meta.get("reasoning", reasoning)
+
+            # Tier 3: execution_spec explicit fields (highest priority)
+            if spec:
+                if spec.cli is not None:
+                    cli = spec.cli
+                if spec.model is not None:
+                    model = spec.model
+                if spec.reasoning is not None:
+                    reasoning = spec.reasoning
                 if spec.prompt_path:
                     prompt_path = spec.prompt_path
 
             # 5. Render prompt
             if prompt_path and Path(prompt_path).exists():
-                rendered = render(prompt_path, issue)
+                rendered = render(prompt_path, issue, repo_root=self.repo_root)
             else:
                 # No prompt template — use issue title+body directly
                 rendered = issue["title"]
@@ -138,14 +154,14 @@ class DagRunner:
             if updated is None:
                 return DagResult("error", steps=step + 1, error="issue vanished")
 
-            if updated["status"] not in ("closed",):
+            if updated["status"] != "closed":
                 self.console.print(
                     f"  [yellow]Issue not closed after execution "
                     f"(status={updated['status']})[/yellow]"
                 )
                 # Agent didn't close the issue — mark failure
                 if exit_code != 0:
-                    self.store.close(issue_id, outcome="failure")
+                    updated = self.store.close(issue_id, outcome="failure")
                     self.console.print("  [red]Marked as failure[/red]")
 
             # 8. Log to forum
@@ -157,9 +173,7 @@ class DagRunner:
                         "issue_id": issue_id,
                         "title": issue["title"],
                         "exit_code": exit_code,
-                        "outcome": self.store.get(issue_id, ).get("outcome")
-                        if self.store.get(issue_id)
-                        else None,
+                        "outcome": updated.get("outcome"),
                         "elapsed_s": round(elapsed, 1),
                     }
                 ),

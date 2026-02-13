@@ -28,7 +28,34 @@ def read_prompt_meta(path: str | Path) -> dict:
     return meta
 
 
-def render(path: str | Path, issue: dict) -> str:
+def build_role_catalog(repo_root: Path) -> str:
+    """Build a markdown catalog of available roles from .loopfarm/roles/*.md."""
+    roles_dir = repo_root / ".loopfarm" / "roles"
+    if not roles_dir.is_dir():
+        return ""
+    sections: list[str] = []
+    for path in sorted(roles_dir.glob("*.md")):
+        text = path.read_text()
+        meta, body = _split_frontmatter(text)
+        name = path.stem
+        # Build config summary from frontmatter
+        parts = []
+        for key in ("cli", "model", "reasoning"):
+            if key in meta:
+                parts.append(f"{key}: {meta[key]}")
+        config_line = " | ".join(parts) if parts else "default config"
+        # First non-empty body line as description
+        desc = ""
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped:
+                desc = stripped
+                break
+        sections.append(f"### {name}\n{config_line}\n> {desc}")
+    return "\n\n".join(sections)
+
+
+def render(path: str | Path, issue: dict, *, repo_root: Path | None = None) -> str:
     """Render a prompt template with issue data substituted."""
     text = Path(path).read_text()
     _, body = _split_frontmatter(text)
@@ -38,4 +65,9 @@ def render(path: str | Path, issue: dict) -> str:
         prompt_text += "\n\n" + issue["body"]
 
     body = body.replace("{{PROMPT}}", prompt_text)
+
+    if "{{ROLES}}" in body:
+        catalog = build_role_catalog(repo_root) if repo_root else ""
+        body = body.replace("{{ROLES}}", catalog)
+
     return body

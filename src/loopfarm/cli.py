@@ -68,9 +68,14 @@ def cmd_init(console: Console) -> int:
             "reasoning: high\n"
             "---\n\n"
             "{{PROMPT}}\n\n"
-            "You are an orchestrator agent. Execute the task described above.\n"
-            "Use the forum store for dynamic context between execution steps.\n"
-            "When done, close the issue.\n"
+            "## Available Roles\n\n"
+            "{{ROLES}}\n\n"
+            "## Responsibilities\n\n"
+            "1. Decide whether the selected issue is atomic.\n"
+            "2. If not atomic, decompose into child issues with `outcome=expanded`.\n"
+            "3. Assign a role to each child issue via `execution_spec: {role: \"<name>\"}`.\n"
+            "4. Use `blocks` dependencies for sequential ordering between children.\n"
+            "5. Keep decomposition deterministic and minimal.\n"
         )
 
     (lf / "logs").mkdir(exist_ok=True)

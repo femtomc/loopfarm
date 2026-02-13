@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
-from ..forum import Forum
+if TYPE_CHECKING:
+    from ..forum import Forum
 from ..util import utc_now_iso
 
 # Forum topic schemas (append-only).

@@ -1,94 +1,47 @@
 # Prompts
 
-`loopfarm` runs strict program specs from `.loopfarm/loopfarm.toml` and/or `.loopfarm/programs/*.toml`.
+Loopfarm prompt surfaces are Markdown templates rendered at runtime.
 
-## Program Contract
+Minimal-core orchestration treats exactly two files as user-authored "code":
 
-Required fields:
+- `.loopfarm/orchestrator.md` (planning/decomposition prompt)
+- `.loopfarm/roles/*.md` (atomic execution role prompts)
 
-1. `[program].name`
-2. `[program].steps`
-3. `[program].termination_phase`
-4. `[program.phase.<name>].cli`
-5. `[program.phase.<name>].prompt`
-6. `[program.phase.<name>].model` for non-`kimi` phases
+Run `loopfarm init` to scaffold these surfaces.
 
-Optional fields:
+## Template Placeholders
 
-1. `[program].project`
-2. `[program].report_source_phase`
-3. `[program].report_target_phases`
-4. `[program.phase.<name>].reasoning`
-5. `[program.phase.<name>].inject`
+Replaced during template rendering:
 
-## Example
+- `{{PROMPT}}`: the current issue prompt payload (title/body)
+- `{{SESSION}}`: the active loop session id
+- `{{PROJECT}}`: the project label (defaults from repo/team)
 
-```toml
-[program]
-name = "implementation"
-project = "loopfarm"
-steps = ["planning", "forward*5", "documentation", "architecture", "backward"]
-termination_phase = "backward"
-report_source_phase = "forward"
-report_target_phases = ["documentation", "architecture", "backward"]
+Context injection placeholders (optional):
 
-[program.phase.planning]
-cli = "codex"
-prompt = ".loopfarm/prompts/implementation/planning.md"
-model = "gpt-5.2"
-reasoning = "xhigh"
+- `{{DYNAMIC_CONTEXT}}`: combined session + operator context block
+- `{{SESSION_CONTEXT}}`: session-only context block
+- `{{USER_CONTEXT}}`: operator-only context block
 
-[program.phase.forward]
-cli = "codex"
-prompt = ".loopfarm/prompts/implementation/forward.md"
-model = "gpt-5.3-codex"
-reasoning = "xhigh"
-inject = ["phase_briefing"]
+Additional runtime injections (optional):
 
-[program.phase.documentation]
-cli = "gemini"
-prompt = ".loopfarm/prompts/implementation/documentation.md"
-model = "gemini-3-pro-preview"
+- `{{PHASE_BRIEFING}}`: recent per-phase summaries (when enabled)
+- `{{FORWARD_REPORT}}`: forward-pass report payload (when enabled)
 
-[program.phase.architecture]
-cli = "codex"
-prompt = ".loopfarm/prompts/implementation/architecture.md"
-model = "gpt-5.2"
-reasoning = "xhigh"
-inject = ["forward_report"]
+## Includes
 
-[program.phase.backward]
-cli = "codex"
-prompt = ".loopfarm/prompts/implementation/backward.md"
-model = "gpt-5.2"
-reasoning = "xhigh"
-inject = ["forward_report"]
+Templates can include other Markdown files via:
+
+```text
+{{> relative/path.md}}
 ```
 
-## Step Syntax
+Includes are resolved relative to the including file.
 
-- `planning` may appear once at the beginning.
-- Repeat uses `*N`, e.g. `forward*5`.
-- `termination_phase` must be present in loop steps.
-
-## Prompt Placeholders
-
-- `{{PROMPT}}`
-- `{{SESSION}}`
-- `{{PROJECT}}`
-- `{{DYNAMIC_CONTEXT}}`
-- `{{PHASE_BRIEFING}}`
-- `{{FORWARD_REPORT}}`
-- `{{SESSION_CONTEXT}}`
-- `{{USER_CONTEXT}}`
-
-## CLI
+## CLI Quick Start
 
 ```bash
 loopfarm init
-loopfarm programs
-loopfarm programs list --json
-loopfarm "Implement a streaming parser"
-loopfarm --program implementation "Improve tail latency"
-loopfarm --project edge-agent "Refactor monitor API"
+loopfarm "Design and implement sync engine"
+loopfarm docs show issue-dag-orchestration --output rich
 ```

@@ -13,7 +13,7 @@ from .ui import (
     add_output_mode_argument,
     make_console,
     render_panel,
-    render_rich_help,
+    render_help,
     render_table,
     resolve_output_mode,
 )
@@ -198,8 +198,9 @@ def _print_topics_rich(rows: list[dict[str, Any]]) -> None:
     )
 
 
-def _print_help_rich() -> None:
-    render_rich_help(
+def _print_help(*, output_mode: str) -> None:
+    render_help(
+        output_mode="rich" if output_mode == "rich" else "plain",
         command="loopfarm forum",
         summary="async message bus for loopfarm sessions and agent notes",
         usage=("loopfarm forum <command> [ARGS]",),
@@ -327,9 +328,8 @@ def main(argv: list[str] | None = None) -> None:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             raise SystemExit(2) from exc
-        if help_output_mode == "rich":
-            _print_help_rich()
-            raise SystemExit(0)
+        _print_help(output_mode=help_output_mode)
+        raise SystemExit(0)
 
     args = _build_parser().parse_args(raw_argv)
 

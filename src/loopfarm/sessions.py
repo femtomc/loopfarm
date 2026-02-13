@@ -14,7 +14,7 @@ from .ui import (
     add_output_mode_argument,
     make_console,
     render_panel,
-    render_rich_help,
+    render_help,
     render_table,
     resolve_output_mode,
 )
@@ -393,13 +393,14 @@ def _print_session_detail_rich(row: dict[str, Any]) -> None:
         render_panel(console, "(none)", title="Briefings")
 
 
-def _print_help_rich(*, prog: str) -> None:
+def _print_help(*, output_mode: str, prog: str) -> None:
     alias_note = (
         "history is an alias of `sessions list/show`."
         if prog == "loopfarm history"
         else "use `loopfarm history` as a shorthand alias."
     )
-    render_rich_help(
+    render_help(
+        output_mode="rich" if output_mode == "rich" else "plain",
         command=prog,
         summary="inspect loop session history, status decisions, and briefings",
         usage=(
@@ -501,9 +502,8 @@ def main(argv: list[str] | None = None, *, prog: str = "loopfarm sessions") -> N
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             raise SystemExit(2) from exc
-        if help_output_mode == "rich":
-            _print_help_rich(prog=prog)
-            raise SystemExit(0)
+        _print_help(output_mode=help_output_mode, prog=prog)
+        raise SystemExit(0)
 
     args = _build_parser(prog=prog).parse_args(raw_argv)
     sessions = Sessions.from_workdir(Path.cwd())

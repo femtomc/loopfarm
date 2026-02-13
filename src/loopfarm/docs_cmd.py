@@ -4,11 +4,12 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from importlib import resources
 
 from .ui import (
     add_output_mode_argument,
     make_console,
+    render_help,
     render_markdown,
     render_panel,
     render_table,
@@ -36,7 +37,7 @@ class DocTopic:
 class DocSearchResult:
     topic: str
     title: str
-    file_name: str
+    match_count: int
     score: int
     snippet: str
 
@@ -45,17 +46,22 @@ _TOPIC_SPECS = (
     DocTopicSpec(
         topic="steps-grammar",
         file_name="phase-plan.md",
-        description="Grammar, rules, and examples for [program].steps.",
+        description="Routing rules for planning vs execution in issue-DAG orchestration.",
     ),
     DocTopicSpec(
         topic="implementation-state-machine",
         file_name="implementation-state-machine.md",
-        description="Execution shape, termination gate, and forward report flow.",
+        description="Select→execute→maintain loop, termination gates, and stop reasons.",
     ),
     DocTopicSpec(
         topic="source-layout",
         file_name="source-layout.md",
         description="Module map for CLI, runtime internals, and persistence stores.",
+    ),
+    DocTopicSpec(
+        topic="issue-dag-orchestration",
+        file_name="issue-dag-orchestration.md",
+        description="Hierarchical planning with issue DAG control-flow + forum state.",
     ),
 )
 
@@ -65,11 +71,13 @@ _TOPIC_ALIASES = {
     "state-machine": "implementation-state-machine",
     "implementation": "implementation-state-machine",
     "layout": "source-layout",
+    "dag": "issue-dag-orchestration",
+    "issue-dag": "issue-dag-orchestration",
+    "orchestration": "issue-dag-orchestration",
 }
 
 
-def _docs_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "docs"
+_DOCS_RESOURCE_PACKAGE = f"{__package__}.docs"
 
 
 def _extract_title(markdown: str, *, fallback: str) -> str:
@@ -81,14 +89,22 @@ def _extract_title(markdown: str, *, fallback: str) -> str:
 
 
 def _load_topics() -> list[DocTopic]:
-    docs_root = _docs_root()
     topics: list[DocTopic] = []
     for spec in _TOPIC_SPECS:
-        path = docs_root / spec.file_name
         try:
-            markdown = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            print(f"error: failed to read docs topic {spec.topic!r}: {exc}", file=sys.stderr)
+            markdown = (
+                resources.files(_DOCS_RESOURCE_PACKAGE)
+                .joinpath(spec.file_name)
+                .read_text(encoding="utf-8")
+            )
+        except (ModuleNotFoundError, FileNotFoundError, OSError) as exc:
+            print(
+                (
+                    "error: failed to read docs topic "
+                    f"{spec.topic!r} from package resources: {exc}"
+                ),
+                file=sys.stderr,
+            )
             raise SystemExit(2) from exc
 
         fallback_title = spec.topic.replace("-", " ").title()
@@ -212,7 +228,7 @@ def _search_topics(
             DocSearchResult(
                 topic=topic.topic,
                 title=topic.title,
-                file_name=topic.file_name,
+                match_count=token_hits,
                 score=score,
                 snippet=snippet,
             )
@@ -248,9 +264,78 @@ def _emit_list_rich(topics: list[DocTopic]) -> None:
         headers=("Topic", "Title", "Description", "File"),
         no_wrap_columns=(0, 3),
         rows=[
-            (topic.topic, topic.title, topic.description, f"docs/{topic.file_name}")
+            (
+                topic.topic,
+                topic.title,
+                topic.description,
+                f"loopfarm/docs/{topic.file_name}",
+            )
             for topic in topics
         ],
+    )
+
+
+def _print_help(*, output_mode: str) -> None:
+    render_help(
+        output_mode="rich" if output_mode == "rich" else "plain",
+        command="loopfarm docs",
+        summary="built-in docs topics for loopfarm minimal-core concepts",
+        usage=(
+            "loopfarm docs [--output MODE] [--json]",
+            "loopfarm docs list [--output MODE] [--json]",
+            "loopfarm docs show <topic> [--output MODE] [--json]",
+            "loopfarm docs search <query> [--topic <topic>] [--limit N] [--output MODE] [--json]",
+        ),
+        sections=(
+            (
+                "Commands",
+                (
+                    ("list", "list available docs topics (default when omitted)"),
+                    ("show <topic>", "show one topic; supports aliases (ex: dag)"),
+                    ("search <query>", "search across topic ids, titles, and content"),
+                ),
+            ),
+            (
+                "Topics",
+                (
+                    ("issue-dag-orchestration (dag)", "minimal-core issue-DAG execution contract"),
+                    ("steps-grammar (steps)", "routing rules for planning vs execution steps"),
+                    ("implementation-state-machine", "issue-DAG runner state machine and termination gates"),
+                    ("source-layout (layout)", "module map for CLI/runtime/stores"),
+                ),
+            ),
+            (
+                "Options",
+                (
+                    ("--json", "emit machine-stable JSON payloads"),
+                    (
+                        "--output MODE",
+                        "auto|plain|rich (or LOOPFARM_OUTPUT)",
+                    ),
+                    ("--topic <topic>", "restrict search to one topic"),
+                    ("--limit <n>", "cap search results (default: 20)"),
+                    ("-h, --help", "show this help"),
+                ),
+            ),
+            (
+                "Quick Start",
+                (
+                    ("start here", "loopfarm docs show issue-dag-orchestration --output rich"),
+                    ("list topics", "loopfarm docs list"),
+                    ("search", "loopfarm docs search \"granularity atomic\""),
+                ),
+            ),
+        ),
+        examples=(
+            (
+                "loopfarm docs show dag --output rich",
+                "open the issue-DAG orchestration contract (alias: dag)",
+            ),
+            (
+                "loopfarm docs search \"role:worker\"",
+                "find references to role tags and role docs",
+            ),
+        ),
     )
 
 
@@ -271,7 +356,7 @@ def _emit_show_rich(topic: DocTopic) -> None:
     console = make_console("rich")
     render_panel(
         console,
-        f"Topic: {topic.topic}\nFile: docs/{topic.file_name}",
+        f"Topic: {topic.topic}\nFile: loopfarm/docs/{topic.file_name}",
         title=f"[bold blue]{topic.title}[/bold blue]",
     )
     console.print()
@@ -283,24 +368,30 @@ def _emit_search_text(results: list[DocSearchResult]) -> None:
         print("(no results)")
         return
 
-    print("TOPIC\tTITLE\tFILE\tSCORE\tSNIPPET")
+    print("TOPIC\tTITLE\tMATCHES\tSNIPPET\tNEXT")
     for row in results:
         print(
-            f"{row.topic}\t{row.title}\tdocs/{row.file_name}\t{row.score}\t{row.snippet}"
+            (
+                f"{row.topic}\t{row.title}\t{row.match_count}\t{row.snippet}\t"
+                f"loopfarm docs show {row.topic}"
+            )
         )
 
 
-def _emit_search_json(results: list[DocSearchResult]) -> None:
-    payload = [
-        {
-            "topic": row.topic,
-            "title": row.title,
-            "file": f"docs/{row.file_name}",
-            "score": row.score,
-            "snippet": row.snippet,
-        }
-        for row in results
-    ]
+def _emit_search_json(*, query: str, results: list[DocSearchResult]) -> None:
+    payload = {
+        "query": query,
+        "results": [
+            {
+                "topic": row.topic,
+                "title": row.title,
+                "match_count": row.match_count,
+                "snippet": row.snippet,
+                "show_command": f"loopfarm docs show {row.topic}",
+            }
+            for row in results
+        ],
+    }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
@@ -313,14 +404,13 @@ def _emit_search_rich(results: list[DocSearchResult]) -> None:
     render_table(
         console,
         title="Docs Search",
-        headers=("Topic", "Title", "File", "Score", "Snippet"),
-        no_wrap_columns=(0, 2, 3),
+        headers=("Topic", "Title", "Matches", "Snippet"),
+        no_wrap_columns=(0, 2),
         rows=[
             (
                 row.topic,
                 row.title,
-                f"docs/{row.file_name}",
-                str(row.score),
+                str(row.match_count),
                 row.snippet,
             )
             for row in results
@@ -356,7 +446,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    if not raw_argv or raw_argv[0].startswith("-"):
+    if raw_argv in (["-h"], ["--help"]):
+        try:
+            help_output_mode = resolve_output_mode(
+                is_tty=getattr(sys.stdout, "isatty", lambda: False)(),
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        _print_help(output_mode=help_output_mode)
+        raise SystemExit(0)
+
+    if not raw_argv:
+        raw_argv = ["list"]
+    elif raw_argv[0].startswith("-"):
         raw_argv = ["list", *raw_argv]
 
     args = _build_parser().parse_args(raw_argv)
@@ -404,7 +507,7 @@ def main(argv: list[str] | None = None) -> None:
         limit=max(1, int(args.limit)),
     )
     if args.json:
-        _emit_search_json(results)
+        _emit_search_json(query=args.query, results=results)
         return
 
     try:

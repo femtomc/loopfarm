@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Literal
+from typing import Literal, TextIO
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -104,6 +104,56 @@ def render_markdown(console: Console, body: str) -> None:
     console.print(Markdown(body))
 
 
+def render_plain_help(
+    *,
+    command: str,
+    summary: str,
+    usage: Sequence[str],
+    sections: Sequence[tuple[str, Sequence[tuple[str, str]]]],
+    examples: Sequence[tuple[str, str]] = (),
+    docs_tip: str | None = None,
+    stderr: bool = False,
+) -> None:
+    stream: TextIO = sys.stderr if stderr else sys.stdout
+
+    print(f"{command}  {summary}", file=stream)
+    print(file=stream)
+    print("Usage", file=stream)
+    for line in usage:
+        print(f"  {line}", file=stream)
+
+    for title, rows in sections:
+        if not rows:
+            continue
+        print(file=stream)
+        print(title, file=stream)
+        width = max(len(str(item)) for item, _ in rows)
+        for item, description in rows:
+            left = str(item)
+            right = str(description)
+            if right:
+                print(f"  {left.ljust(width)}  {right}", file=stream)
+            else:
+                print(f"  {left}", file=stream)
+
+    if examples:
+        print(file=stream)
+        print("Examples", file=stream)
+        width = max(len(str(item)) for item, _ in examples)
+        for item, description in examples:
+            left = str(item)
+            right = str(description)
+            if right:
+                print(f"  {left.ljust(width)}  {right}", file=stream)
+            else:
+                print(f"  {left}", file=stream)
+
+    if docs_tip:
+        print(file=stream)
+        print("Docs", file=stream)
+        print(f"  {docs_tip}", file=stream)
+
+
 def render_rich_help(
     *,
     command: str,
@@ -146,3 +196,37 @@ def render_rich_help(
     if docs_tip:
         console.print()
         render_panel(console, docs_tip, title="Docs")
+
+
+def render_help(
+    *,
+    output_mode: OutputMode,
+    command: str,
+    summary: str,
+    usage: Sequence[str],
+    sections: Sequence[tuple[str, Sequence[tuple[str, str]]]],
+    examples: Sequence[tuple[str, str]] = (),
+    docs_tip: str | None = None,
+    stderr: bool = False,
+) -> None:
+    if output_mode == "rich":
+        render_rich_help(
+            command=command,
+            summary=summary,
+            usage=usage,
+            sections=sections,
+            examples=examples,
+            docs_tip=docs_tip,
+            stderr=stderr,
+        )
+        return
+
+    render_plain_help(
+        command=command,
+        summary=summary,
+        usage=usage,
+        sections=sections,
+        examples=examples,
+        docs_tip=docs_tip,
+        stderr=stderr,
+    )

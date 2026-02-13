@@ -24,10 +24,19 @@ You are going to do one job, and then you're going to get torn down. Oh bother, 
 more on that, do you even know what you're building ("build me a billion dollar SaaS, and MAKE SURE IT IS SECURE")? Are the agents getting confused? Maybe you should stop confusing them with your idiocy.
 
 Loops are an _excellent_ vehicle to move serious tokens (unfortunately, your children will not be going to college) -- but their properties are subtle. 
-Context management is _paramount_. It is not sufficient to give a loop some half-curated codebase, or some half-baked vagary. Take ownership of the tokens that
-flow in and out of your work.
+Context management is _paramount_. It is not sufficient to give a loop some half-curated codebase, or some half-baked vagary. Firstly, moron, take ownership of the tokens that
+flow in and out of your work. Secondly, loops should be _focused_ on a chunk of work which has been sufficiently de-risked. Otherwise, the compounding context properties of 
+loops will destroy you.
 
-Anyways, this code (`uv tool install --from git+https://github.com/femtomc/loopfarm loopfarm` btw) gives you _loops_, an issue tracker, and a forum for agent conversation -- all rolled into one. 
-It's programmable -- don't let people tell you how to use your own tools. The relationship between you and your tools is an intimate one.
+DAGs are an excellent vehicle for work orchestration (the breaking down of goals into subgoals, yada yada). But who makes the DAG? Idiot. Agents make the DAG. Did you really think you'd need to get involved? You, with your paltry taste
+and sordid goals? DAGs are the pattern of hierarchical planning. Hierarchical planning works.
+
+Anyways, this code (`uv tool install --from git+https://github.com/femtomc/loopfarm loopfarm` btw) gives you a hierarchical planner, _loops_, an issue tracker, and a forum for agent conversation -- all rolled into one.
+
+It's also programmable -- don't let people tell you how to use your own tools. The relationship between you and your tools is an intimate one.
 Most companies start from a place of disrespect: "you don't know how to use your tools ... we do." The gift of a programmable tool is the ultimate form of respect ... 
 just ask your agent about it.
+
+## How to use
+
+Install via `uv tool install --from git+https://github.com/femtomc/loopfarm loopfarm` and then poke around the CLI or have your agent do it. It's self-explanatory. If it's not self-explanatory, it's not ready for usage, and you shouldn't use it.

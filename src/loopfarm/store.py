@@ -148,6 +148,20 @@ class IssueStore:
     def close(self, issue_id: str, outcome: str = "success") -> dict:
         return self.update(issue_id, status="closed", outcome=outcome)
 
+    def reset_in_progress(self, root_id: str) -> list[str]:
+        """Reset all in_progress issues in the subtree back to open. Returns reset ids."""
+        rows = self._load()
+        ids_in_scope = set(self.subtree_ids(root_id))
+        reset = []
+        for r in rows:
+            if r["id"] in ids_in_scope and r["status"] == "in_progress":
+                r["status"] = "open"
+                r["updated_at"] = _now()
+                reset.append(r["id"])
+        if reset:
+            self._save(rows)
+        return reset
+
     # -- dependency helpers -------------------------------------------------
 
     def add_dep(self, src_id: str, dep_type: str, dst_id: str) -> None:

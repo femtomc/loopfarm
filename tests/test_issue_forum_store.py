@@ -251,6 +251,15 @@ def test_issue_outcome_requires_terminal_status(tmp_path: Path) -> None:
         )
 
 
+def _execution_spec_with_control_flow(mode: str) -> dict[str, object]:
+    return {
+        "version": 1,
+        "role": "worker",
+        "prompt_path": ".loopfarm/roles/worker.md",
+        "control_flow": {"mode": mode},
+    }
+
+
 def test_issue_control_flow_sequence_evaluates_failure_for_mixed_outcomes(
     tmp_path: Path,
 ) -> None:
@@ -360,6 +369,91 @@ def test_issue_control_flow_parallel_uses_majority_voting(tmp_path: Path) -> Non
     assert evaluated["control_flow"] == "parallel"
     assert evaluated["outcome"] == "success"
     assert evaluated["outcome_counts"]["success"] == 3
+
+
+def test_issue_control_flow_uses_execution_spec_mode_when_cf_tag_is_absent(
+    tmp_path: Path,
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    parent = issue.create(
+        "Spec-driven sequence node",
+        tags=["node:control"],
+        execution_spec=_execution_spec_with_control_flow("sequence"),
+    )
+
+    child_success = issue.create("Spec child success")
+    child_failure = issue.create("Spec child failure")
+    issue.add_dep(parent["id"], "parent", child_success["id"])
+    issue.add_dep(parent["id"], "parent", child_failure["id"])
+
+    issue.set_status(
+        child_success["id"],
+        "closed",
+        outcome="success",
+        outcome_provided=True,
+    )
+    issue.set_status(
+        child_failure["id"],
+        "closed",
+        outcome="failure",
+        outcome_provided=True,
+    )
+
+    evaluated = issue.evaluate_control_flow(parent["id"])
+    assert evaluated is not None
+    assert evaluated["control_flow"] == "sequence"
+    assert evaluated["outcome"] == "failure"
+
+
+def test_issue_reconcile_control_flow_uses_execution_spec_mode_when_cf_tag_is_absent(
+    tmp_path: Path,
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    fallback = issue.create(
+        "Spec-driven fallback control",
+        tags=["node:control"],
+        execution_spec=_execution_spec_with_control_flow("fallback"),
+    )
+    alt_fast = issue.create("Spec fallback fast path")
+    alt_safe = issue.create("Spec fallback safe path")
+    alt_manual = issue.create("Spec fallback manual path")
+
+    issue.add_dep(fallback["id"], "parent", alt_fast["id"])
+    issue.add_dep(fallback["id"], "parent", alt_safe["id"])
+    issue.add_dep(fallback["id"], "parent", alt_manual["id"])
+    issue.add_dep(alt_fast["id"], "blocks", alt_safe["id"])
+    issue.add_dep(alt_safe["id"], "blocks", alt_manual["id"])
+
+    issue.set_status(alt_fast["id"], "closed", outcome="failure", outcome_provided=True)
+    issue.set_status(alt_safe["id"], "closed", outcome="success", outcome_provided=True)
+
+    reconciled = issue.reconcile_control_flow(fallback["id"])
+    assert reconciled["control_flow"] == "fallback"
+    assert reconciled["outcome"] == "success"
+    assert reconciled["pruned_ids"] == [alt_manual["id"]]
+    assert reconciled["pruned_count"] == 1
+
+
+def test_issue_control_flow_rejects_conflicting_tag_and_execution_spec_mode(
+    tmp_path: Path,
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    parent = issue.create(
+        "Conflicting control-flow declarations",
+        tags=["node:control", "cf:sequence"],
+        execution_spec=_execution_spec_with_control_flow("fallback"),
+    )
+    child = issue.create("Child")
+    issue.add_dep(parent["id"], "parent", child["id"])
+    issue.set_status(
+        child["id"],
+        "closed",
+        outcome="success",
+        outcome_provided=True,
+    )
+
+    with pytest.raises(ValueError, match="conflicting control-flow configuration"):
+        issue.evaluate_control_flow(parent["id"])
 
 
 def test_issue_control_flow_helpers_only_return_terminal_children_nodes(
@@ -558,6 +652,34 @@ def test_issue_reconcile_subtree_walks_control_nodes(tmp_path: Path) -> None:
     assert skipped["outcome"] == "skipped"
 
 
+def test_issue_reconcile_subtree_walks_spec_control_nodes_without_cf_tags(
+    tmp_path: Path,
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+
+    root = issue.create("Root issue")
+    sequence = issue.create(
+        "Spec sequence",
+        tags=["node:control"],
+        execution_spec=_execution_spec_with_control_flow("sequence"),
+    )
+    first = issue.create("Spec first nested step")
+    second = issue.create("Spec second nested step")
+
+    issue.add_dep(root["id"], "parent", sequence["id"])
+    issue.add_dep(sequence["id"], "parent", first["id"])
+    issue.add_dep(sequence["id"], "parent", second["id"])
+    issue.add_dep(first["id"], "blocks", second["id"])
+
+    issue.set_status(first["id"], "closed", outcome="failure", outcome_provided=True)
+    payload = issue.reconcile_control_flow_subtree(root["id"])
+
+    assert payload["root_id"] == root["id"]
+    assert payload["reconciled_count"] == 1
+    assert payload["reconciled"][0]["id"] == sequence["id"]
+    assert payload["reconciled"][0]["outcome"] == "failure"
+
+
 def _build_incremental_reconcile_fixture(issue: Issue) -> dict[str, str]:
     root = issue.create("Root issue")
     sequence = issue.create(
@@ -628,6 +750,36 @@ def test_issue_affected_control_flow_ancestors_scopes_to_root_subtree(
 
     assert [row["id"] for row in targets] == [nodes["fallback"], nodes["sequence"]]
     assert [row["depth"] for row in targets] == [1, 2]
+
+
+def test_issue_affected_control_flow_ancestors_detects_spec_control_modes(
+    tmp_path: Path,
+) -> None:
+    issue = Issue.from_workdir(tmp_path)
+    root = issue.create("Root")
+    sequence = issue.create(
+        "Spec sequence",
+        tags=["node:control"],
+        execution_spec=_execution_spec_with_control_flow("sequence"),
+    )
+    fallback = issue.create(
+        "Spec fallback",
+        tags=["node:control"],
+        execution_spec=_execution_spec_with_control_flow("fallback"),
+    )
+    leaf = issue.create("Leaf")
+
+    issue.add_dep(root["id"], "parent", sequence["id"])
+    issue.add_dep(sequence["id"], "parent", fallback["id"])
+    issue.add_dep(fallback["id"], "parent", leaf["id"])
+
+    targets = issue.affected_control_flow_ancestors(
+        leaf["id"],
+        root_id=root["id"],
+    )
+
+    assert [row["id"] for row in targets] == [fallback["id"], sequence["id"]]
+    assert [row["control_flow"] for row in targets] == ["fallback", "sequence"]
 
 
 def test_issue_incremental_reconcile_matches_full_subtree_reconcile(

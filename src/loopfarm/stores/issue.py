@@ -156,6 +156,81 @@ def _control_flow_kind_from_tags(
     return present[0]
 
 
+def _control_flow_kind_from_execution_spec(
+    execution_spec: object,
+    *,
+    issue_id: str | None = None,
+    strict: bool = False,
+) -> str | None:
+    if execution_spec is None:
+        return None
+    if not isinstance(execution_spec, dict):
+        if strict:
+            target = issue_id or "issue"
+            raise ValueError(f"invalid execution_spec payload for {target}")
+        return None
+
+    raw_control_flow = execution_spec.get("control_flow")
+    if raw_control_flow is None:
+        return None
+    if not isinstance(raw_control_flow, dict):
+        if strict:
+            target = issue_id or "issue"
+            raise ValueError(f"execution_spec.control_flow must be an object for {target}")
+        return None
+
+    raw_mode = raw_control_flow.get("mode")
+    if raw_mode is None:
+        return None
+    if not isinstance(raw_mode, str):
+        if strict:
+            target = issue_id or "issue"
+            raise ValueError(
+                f"execution_spec.control_flow.mode must be a string for {target}"
+            )
+        return None
+
+    mode = raw_mode.strip().lower()
+    if not mode:
+        if strict:
+            target = issue_id or "issue"
+            raise ValueError(f"execution_spec.control_flow.mode cannot be empty for {target}")
+        return None
+    if mode not in CONTROL_FLOW_KINDS:
+        if strict:
+            target = issue_id or "issue"
+            allowed = ", ".join(CONTROL_FLOW_KINDS)
+            raise ValueError(
+                f"execution_spec.control_flow.mode must be one of {allowed} for {target}"
+            )
+        return None
+    return mode
+
+
+def _resolve_control_flow_kind(
+    tags: list[str],
+    *,
+    execution_spec: object = None,
+    issue_id: str | None = None,
+    strict: bool = False,
+) -> str | None:
+    tag_kind = _control_flow_kind_from_tags(tags, issue_id=issue_id, strict=strict)
+    spec_kind = _control_flow_kind_from_execution_spec(
+        execution_spec,
+        issue_id=issue_id,
+        strict=strict,
+    )
+    if tag_kind and spec_kind and tag_kind != spec_kind:
+        if strict:
+            target = issue_id or "issue"
+            raise ValueError(
+                f"conflicting control-flow configuration for {target}: "
+                f"tags={tag_kind!r}, execution_spec={spec_kind!r}"
+            )
+        return tag_kind
+    return tag_kind or spec_kind
+
+
 def _evaluate_control_flow_outcome(
     control_flow: str,
     child_outcomes: list[str | None],
@@ -1554,13 +1629,18 @@ class IssueStore:
                 )
 
             tags_by_id = self._tags_for_ids(conn, sorted(scoped_ids))
+            execution_specs_by_id = self._execution_specs_for_ids(
+                conn,
+                sorted(scoped_ids),
+            )
 
         targets: list[dict[str, Any]] = []
         for node_id, depth in chain:
             if depth == 0 or node_id not in scoped_ids:
                 continue
-            control_flow = _control_flow_kind_from_tags(
+            control_flow = _resolve_control_flow_kind(
                 tags_by_id.get(node_id, []),
+                execution_spec=execution_specs_by_id.get(node_id),
                 issue_id=node_id,
                 strict=False,
             )
@@ -1749,8 +1829,9 @@ class IssueStore:
         if issue is None:
             raise ValueError(f"unknown issue: {issue_key}")
 
-        control_flow = _control_flow_kind_from_tags(
+        control_flow = _resolve_control_flow_kind(
             [str(tag) for tag in issue.get("tags") or []],
+            execution_spec=issue.get("execution_spec"),
             issue_id=issue_key,
             strict=True,
         )
@@ -1889,12 +1970,14 @@ class IssueStore:
             rows = self._subtree_ids_with_depth(conn, root_key)
             issue_ids = [issue_id for issue_id, _depth in rows]
             tags_by_id = self._tags_for_ids(conn, issue_ids)
+            execution_specs_by_id = self._execution_specs_for_ids(conn, issue_ids)
 
         targets = [
             issue_id
             for issue_id, _depth in rows
-            if _control_flow_kind_from_tags(
+            if _resolve_control_flow_kind(
                 tags_by_id.get(issue_id, []),
+                execution_spec=execution_specs_by_id.get(issue_id),
                 issue_id=issue_id,
                 strict=False,
             )
@@ -1928,8 +2011,9 @@ class IssueStore:
         if issue is None:
             raise ValueError(f"unknown issue: {issue_key}")
 
-        control_flow = _control_flow_kind_from_tags(
+        control_flow = _resolve_control_flow_kind(
             [str(tag) for tag in issue.get("tags") or []],
+            execution_spec=issue.get("execution_spec"),
             issue_id=issue_key,
             strict=True,
         )
@@ -1980,8 +2064,9 @@ class IssueStore:
         for issue in candidates:
             if str(issue.get("status") or "") in TERMINAL_STATUSES:
                 continue
-            control_flow = _control_flow_kind_from_tags(
+            control_flow = _resolve_control_flow_kind(
                 [str(tag) for tag in issue.get("tags") or []],
+                execution_spec=issue.get("execution_spec"),
                 strict=False,
             )
             if control_flow is None:
@@ -2323,3 +2408,26 @@ class IssueStore:
         for row in rows:
             tags[str(row["issue_id"])].append(str(row["tag"]))
         return tags
+
+    def _execution_specs_for_ids(
+        self,
+        conn: sqlite3.Connection,
+        issue_ids: list[str],
+    ) -> dict[str, dict[str, Any] | None]:
+        if not issue_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in issue_ids)
+        rows = conn.execute(
+            f"""
+            SELECT id, execution_spec
+            FROM issues
+            WHERE id IN ({placeholders})
+            """,
+            tuple(issue_ids),
+        ).fetchall()
+
+        specs: dict[str, dict[str, Any] | None] = {issue_id: None for issue_id in issue_ids}
+        for row in rows:
+            specs[str(row["id"])] = _deserialize_execution_spec(row["execution_spec"])
+        return specs

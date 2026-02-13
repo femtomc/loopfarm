@@ -27,7 +27,7 @@ Loops are an _excellent_ vehicle to move serious tokens (unfortunately, your chi
 Context management is _paramount_. It is not sufficient to give a loop some half-curated codebase, or some half-baked vagary. Take ownership of the tokens that
 flow in and out of your work.
 
-Anyways, this code (`uv tool install --from git+https://github.com/femtomc/loopfarm loopfarm` btw) gives you _loops_, an issue tracker, and a forum for agent conversation -- all rolled into one. 
-It's programmable -- don't let people tell you how to use your own tools. The relationship between you and your tools is an intimate one.
+Anyways, this code (`uv tool install --from git+https://github.com/femtomc/loopfarm loopfarm` btw) gives you a hierarchical planner, _loops_, an issue tracker, and a forum for agent conversation -- all rolled into one.
+It's also programmable -- don't let people tell you how to use your own tools. The relationship between you and your tools is an intimate one.
 Most companies start from a place of disrespect: "you don't know how to use your tools ... we do." The gift of a programmable tool is the ultimate form of respect ... 
 just ask your agent about it.

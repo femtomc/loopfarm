@@ -6,7 +6,6 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -34,16 +33,11 @@ def _run_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="loopfarm", add_help=False)
     p.add_argument("prompt", nargs="*")
     p.add_argument("--max-steps", type=int, default=20)
-    p.add_argument("--cli", default="codex", choices=["codex", "claude"])
-    p.add_argument("--model", default="o3")
-    p.add_argument("--reasoning", default="high")
-    p.add_argument("--prompt-path", default=None)
     p.add_argument("--json", action="store_true")
     return p
 
 
 def _ago(ts: int) -> str:
-    """Human-readable time ago string."""
     delta = int(time.time()) - ts
     if delta < 60:
         return "just now"
@@ -69,8 +63,8 @@ def cmd_init(console: Console) -> int:
     if not orch.exists():
         orch.write_text(
             "---\n"
-            "cli: codex\n"
-            "model: o3\n"
+            "cli: claude\n"
+            "model: opus\n"
             "reasoning: high\n"
             "---\n\n"
             "{{PROMPT}}\n\n"
@@ -117,7 +111,6 @@ def cmd_replay(argv: list[str], console: Console) -> int:
         if idx + 1 < len(argv):
             backend_name = argv[idx + 1]
 
-    # Resolve target: could be issue id, path, or stem
     path = Path(target)
     if not path.exists():
         path = logs_dir / f"{target}.jsonl"
@@ -150,7 +143,7 @@ def cmd_resume(argv: list[str], console: Console) -> int:
 
     if not argv or argv[0] in ("-h", "--help"):
         console.print("[bold]loopfarm resume[/bold] — resume an interrupted DAG\n")
-        console.print("  loopfarm resume [dim]<root-id>[/dim] [dim][--max-steps N] [--cli codex|claude] [--model M][/dim]\n")
+        console.print("  loopfarm resume [dim]<root-id>[/dim] [dim][--max-steps N][/dim]\n")
         roots = store.list(tag="node:root")
         if roots:
             table = Table(title="Root Issues", expand=False, show_edge=False, pad_edge=False)
@@ -172,13 +165,9 @@ def cmd_resume(argv: list[str], console: Console) -> int:
     issue_id = argv[0]
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--max-steps", type=int, default=20)
-    p.add_argument("--cli", default="codex", choices=["codex", "claude"])
-    p.add_argument("--model", default="o3")
-    p.add_argument("--reasoning", default="high")
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv[1:])
 
-    # Resolve issue id (prefix match)
     issue = store.get(issue_id)
     if issue is None:
         candidates = [r for r in store.list() if r["id"].startswith(issue_id)]
@@ -195,7 +184,6 @@ def cmd_resume(argv: list[str], console: Console) -> int:
 
     root_id = issue["id"]
 
-    # Reset stale in_progress issues
     reset = store.reset_in_progress(root_id)
     if reset:
         console.print(Panel(
@@ -210,13 +198,7 @@ def cmd_resume(argv: list[str], console: Console) -> int:
         expand=False,
     ))
 
-    runner = DagRunner(
-        store, forum, root,
-        default_cli=args.cli,
-        default_model=args.model,
-        default_reasoning=args.reasoning,
-        console=console,
-    )
+    runner = DagRunner(store, forum, root, console=console)
     result = runner.run(root_id, max_steps=args.max_steps)
 
     if args.json:
@@ -242,13 +224,6 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
     root_issue = store.create(
         prompt_text,
         tags=["node:agent", "node:root"],
-        execution_spec={
-            "role": "orchestrator",
-            "prompt_path": args.prompt_path or "",
-            "cli": args.cli,
-            "model": args.model,
-            "reasoning": args.reasoning,
-        },
     )
     console.print(Panel(
         f"[bold]{root_issue['id']}[/bold] — {prompt_text[:80]}",
@@ -257,13 +232,7 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
         expand=False,
     ))
 
-    runner = DagRunner(
-        store, forum, root,
-        default_cli=args.cli,
-        default_model=args.model,
-        default_reasoning=args.reasoning,
-        console=console,
-    )
+    runner = DagRunner(store, forum, root, console=console)
     result = runner.run(root_issue["id"], max_steps=args.max_steps)
 
     if args.json:
@@ -298,13 +267,11 @@ def _print_help(console: Console) -> None:
     opts.add_column("Option", style="bold")
     opts.add_column("Description", style="dim")
     opts.add_row("--max-steps N", "Step budget (default: 20)")
-    opts.add_row("--cli codex|claude", "Default backend (default: codex)")
-    opts.add_row("--model MODEL", "Default model (default: o3)")
-    opts.add_row("--reasoning LEVEL", "Reasoning level (default: high)")
-    opts.add_row("--prompt-path PATH", "Prompt template path")
     opts.add_row("--json", "JSON output")
     opts.add_row("--version", "Show version")
     console.print(opts)
+    console.print()
+    console.print(Text("Configure backend/model/reasoning in .loopfarm/orchestrator.md frontmatter", style="dim"))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -318,7 +285,6 @@ def main(argv: list[str] | None = None) -> None:
         _print_help(console)
         sys.exit(0)
 
-    # Subcommand dispatch
     if raw[0] == "init":
         sys.exit(cmd_init(console))
 
@@ -328,7 +294,6 @@ def main(argv: list[str] | None = None) -> None:
     if raw[0] == "resume":
         sys.exit(cmd_resume(raw[1:], console))
 
-    # Everything else is a run command
     args = _run_parser().parse_args(raw)
     sys.exit(cmd_run(args, console))
 

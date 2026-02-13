@@ -24,23 +24,22 @@ class DagResult:
 
 
 class DagRunner:
+    # Hardcoded fallbacks if neither execution_spec nor orchestrator.md provide config
+    _FALLBACK_CLI = "claude"
+    _FALLBACK_MODEL = "opus"
+    _FALLBACK_REASONING = "high"
+
     def __init__(
         self,
         store: IssueStore,
         forum: ForumStore,
         repo_root: Path,
         *,
-        default_cli: str = "codex",
-        default_model: str = "o3",
-        default_reasoning: str = "high",
         console: Console | None = None,
     ) -> None:
         self.store = store
         self.forum = forum
         self.repo_root = repo_root
-        self.default_cli = default_cli
-        self.default_model = default_model
-        self.default_reasoning = default_reasoning
         self.console = console or Console()
 
     def run(self, root_id: str, max_steps: int = 20) -> DagResult:
@@ -72,11 +71,22 @@ class DagRunner:
             self.store.claim(issue_id)
 
             # 4. Route: determine backend, model, prompt
-            cli = self.default_cli
-            model = self.default_model
-            reasoning = self.default_reasoning
+            # Priority: execution_spec > orchestrator.md frontmatter > hardcoded fallbacks
+            cli = self._FALLBACK_CLI
+            model = self._FALLBACK_MODEL
+            reasoning = self._FALLBACK_REASONING
             prompt_path: str | None = None
 
+            # Read orchestrator defaults first (lowest priority override)
+            orchestrator = self.repo_root / ".loopfarm" / "orchestrator.md"
+            if orchestrator.exists():
+                meta = read_prompt_meta(orchestrator)
+                cli = meta.get("cli", cli)
+                model = meta.get("model", model)
+                reasoning = meta.get("reasoning", reasoning)
+                prompt_path = str(orchestrator)
+
+            # execution_spec overrides everything
             if issue.get("execution_spec"):
                 spec = ExecutionSpec.from_dict(
                     issue["execution_spec"], self.repo_root
@@ -84,17 +94,8 @@ class DagRunner:
                 cli = spec.cli
                 model = spec.model
                 reasoning = spec.reasoning
-                prompt_path = spec.prompt_path
-
-            if not prompt_path:
-                # Fall back to orchestrator prompt
-                orchestrator = self.repo_root / ".loopfarm" / "orchestrator.md"
-                if orchestrator.exists():
-                    prompt_path = str(orchestrator)
-                    meta = read_prompt_meta(prompt_path)
-                    cli = meta.get("cli", cli)
-                    model = meta.get("model", model)
-                    reasoning = meta.get("reasoning", reasoning)
+                if spec.prompt_path:
+                    prompt_path = spec.prompt_path
 
             # 5. Render prompt
             if prompt_path and Path(prompt_path).exists():

@@ -10,8 +10,8 @@ from pathlib import Path
 class ExecutionSpec:
     role: str
     prompt_path: str
-    cli: str = "codex"
-    model: str = "o3"
+    cli: str = "claude"
+    model: str = "opus"
     reasoning: str = "high"
 
     @classmethod
@@ -22,7 +22,7 @@ class ExecutionSpec:
         return cls(
             role=d.get("role", "worker"),
             prompt_path=prompt_path,
-            cli=d.get("cli", "codex"),
-            model=d.get("model", "o3"),
+            cli=d.get("cli", "claude"),
+            model=d.get("model", "opus"),
             reasoning=d.get("reasoning", "high"),
         )

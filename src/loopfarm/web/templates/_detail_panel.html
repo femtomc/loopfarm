@@ -1,0 +1,48 @@
+{# Detail panel — loaded into the right pane when a node is focused #}
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <input type="text" class="detail-title emes-input" id="detail-title"
+           value="" onblur="saveTitle()" onkeydown="if(event.key==='Enter'){this.blur()}">
+    <button class="emes-btn-sm" onclick="closePanel()">&#x2715;</button>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">body</h6>
+    <textarea class="detail-body emes-textarea-brutal" id="detail-body"
+              rows="4" onblur="saveBody()"></textarea>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">metadata</h6>
+    <div class="detail-meta" id="detail-meta"></div>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">tags</h6>
+    <div id="detail-tags" class="emes-flex emes-gap-1" style="flex-wrap:wrap"></div>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">dependencies</h6>
+    <div id="detail-deps"></div>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">actions</h6>
+    <div class="emes-flex emes-gap-2" style="flex-wrap:wrap" id="detail-actions"></div>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">execution log</h6>
+    <div id="detail-log" class="detail-log"></div>
+  </div>
+
+  <div class="detail-section">
+    <h6 class="emes-h6">forum messages</h6>
+    <div id="detail-forum"></div>
+    <div class="emes-flex emes-gap-2 emes-mt-2">
+      <input type="text" class="emes-input" id="forum-input" placeholder="Post a message..." style="flex:1">
+      <button class="emes-btn-sm" onclick="postForumMessage()">post</button>
+    </div>
+  </div>
+</div>

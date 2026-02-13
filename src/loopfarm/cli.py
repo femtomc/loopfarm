@@ -181,6 +181,55 @@ def cmd_init(console: Console) -> int:
     return 0
 
 
+def cmd_serve(argv: list[str], console: Console) -> int:
+    if argv and argv[0] in ("-h", "--help"):
+        return _print_command_help(
+            console,
+            title="loopfarm serve",
+            usage="loopfarm serve [--host HOST] [--port PORT] [--reload]",
+            about="Start the loopfarm web interface.",
+            options=[
+                ("--host", "Bind address (default: 127.0.0.1)"),
+                ("--port", "Bind port (default: 8420)"),
+                ("--reload", "Enable auto-reload for development"),
+            ],
+            examples=["loopfarm serve", "loopfarm serve --port 9000 --reload"],
+        )
+
+    p = argparse.ArgumentParser(prog="loopfarm serve", add_help=False)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8420)
+    p.add_argument("--reload", action="store_true")
+    args = p.parse_args(argv)
+
+    try:
+        import uvicorn
+    except ImportError:
+        console.print(
+            "[red]Missing web dependencies.[/red] "
+            "Install with: [bold]pip install loopfarm\\[web][/bold]"
+        )
+        return 1
+
+    console.print(
+        Panel(
+            f"Starting web server at [bold]http://{args.host}:{args.port}[/bold]",
+            title="loopfarm serve",
+            style="cyan",
+            expand=False,
+        )
+    )
+
+    uvicorn.run(
+        "loopfarm.web:create_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
+    return 0
+
+
 def cmd_replay(argv: list[str], console: Console) -> int:
     root = _find_repo_root()
     logs_dir = root / ".loopfarm" / "logs"
@@ -1251,6 +1300,7 @@ def _print_help(console: Console) -> None:
     cmds.add_row("loopfarm roles", "List role templates (JSON by default)")
     cmds.add_row("loopfarm issues <command>", "Issue DAG operations (create/update/close/deps/ready)")
     cmds.add_row("loopfarm forum <command>", "Forum operations (post/read/topics)")
+    cmds.add_row("loopfarm serve", "Start the web interface")
     console.print(cmds)
     console.print()
 
@@ -1309,6 +1359,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if command == "resume":
         sys.exit(cmd_resume(raw[1:], console))
+
+    if command == "serve":
+        sys.exit(cmd_serve(raw[1:], console))
 
     # Backward-compatible shorthand: treat unknown top-level text as run prompt.
     sys.exit(_dispatch_prompt_shorthand(raw, console))

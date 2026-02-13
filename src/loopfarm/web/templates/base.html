@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}loopfarm{% endblock %}</title>
+  <link rel="stylesheet" href="/static/emes.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="emes-status-bar show-mobile" id="status-bar">
+    <div class="emes-status-bar-item">
+      <span class="status-indicator" id="sse-indicator"></span>
+      <span class="emes-status-bar-value" id="sse-status">connecting</span>
+    </div>
+    <div class="emes-status-bar-item">
+      <span class="emes-status-bar-label">roots</span>
+      <span class="emes-status-bar-value" id="stat-roots">-</span>
+    </div>
+    <div class="emes-status-bar-item">
+      <span class="emes-status-bar-label">open</span>
+      <span class="emes-status-bar-value" id="stat-open">-</span>
+    </div>
+    <div class="emes-status-bar-item">
+      <span class="emes-status-bar-label">ready</span>
+      <span class="emes-status-bar-value" id="stat-ready">-</span>
+    </div>
+    <div class="emes-status-bar-item">
+      <span class="emes-status-bar-label">failed</span>
+      <span class="emes-status-bar-value" id="stat-failed">-</span>
+    </div>
+  </div>
+
+  <div class="emes-colorscale-full"></div>
+
+  <header class="emes-header">
+    <div class="emes-header-inner">
+      <div class="emes-header-brand">
+        <a href="/" class="emes-logo-logotype" style="text-decoration:none;color:inherit">
+          <h1 style="margin:0;font-size:16px">loopfarm</h1>
+        </a>
+      </div>
+      <nav class="emes-header-nav">
+        <a href="/" class="emes-btn-nav{% if active_nav == 'dashboard' %} active{% endif %}">dashboard</a>
+        <a href="/roles" class="emes-btn-nav{% if active_nav == 'roles' %} active{% endif %}">roles</a>
+      </nav>
+    </div>
+  </header>
+
+  {% block content %}{% endblock %}
+
+  <footer class="emes-footer">
+    <div class="emes-footer-inner" style="max-width:none">
+      <span class="emes-footer-brand"><span class="emes-sku">loopfarm {{ version }}</span></span>
+      <span style="font-size:0.75rem;color:var(--emes-gray-500)">{{ repo_root }}</span>
+    </div>
+  </footer>
+
+  <script src="/static/emes.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

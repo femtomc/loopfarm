@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% set active_nav = "dashboard" %}
+
+{% block title %}loopfarm — dashboard{% endblock %}
+
+{% block content %}
+<div style="padding:1rem">
+  <div class="emes-flex emes-gap-3 emes-mb-3" style="flex-wrap:wrap">
+    <div class="emes-box" data-label="total" style="flex:1;min-width:120px;text-align:center;padding:1rem">
+      <span class="metric-large">{{ total_issues }}</span>
+      <span class="emes-metric-label">issues</span>
+    </div>
+    <div class="emes-box" data-label="open" style="flex:1;min-width:120px;text-align:center;padding:1rem">
+      <span class="metric-large">{{ open_count }}</span>
+      <span class="emes-metric-label">open</span>
+    </div>
+    <div class="emes-box" data-label="ready" style="flex:1;min-width:120px;text-align:center;padding:1rem">
+      <span class="metric-large">{{ ready_count }}</span>
+      <span class="emes-metric-label">ready</span>
+    </div>
+    <div class="emes-box{% if failed_count > 0 %} emes-border-error{% endif %}" data-label="failed" style="flex:1;min-width:120px;text-align:center;padding:1rem">
+      <span class="metric-large{% if failed_count > 0 %} emes-text-error{% endif %}">{{ failed_count }}</span>
+      <span class="emes-metric-label">failed</span>
+    </div>
+  </div>
+
+  <div class="emes-widget">
+    <div class="emes-widget-header">
+      <span>Root Issues</span>
+      <span class="emes-widget-header-count">{{ roots|length }}</span>
+    </div>
+    <div class="emes-widget-body">
+      {% if roots %}
+        {% for rs in roots %}
+        <a href="/dag/{{ rs.issue.id }}" class="emes-widget-item" style="text-decoration:none;color:inherit;display:block;padding:0.75rem">
+          <div class="emes-flex emes-items-center emes-gap-2 emes-mb-1">
+            {% if rs.issue.status == "closed" %}
+              {% if rs.issue.outcome == "failure" %}
+                <span class="issue-state-badge" style="color:var(--emes-red)">&#x2715;</span>
+              {% else %}
+                <span class="issue-state-badge" style="color:var(--emes-green)">&#x2713;</span>
+              {% endif %}
+            {% else %}
+              <span class="issue-state-badge status-open">&#x25CF;</span>
+            {% endif %}
+            <span style="font-weight:600">{{ rs.issue.title[:80] }}</span>
+            <span class="emes-sku" style="font-size:0.6rem;margin-left:auto">{{ rs.issue.id[:16] }}</span>
+          </div>
+          <div class="emes-flex emes-items-center emes-gap-2">
+            <div class="progress-brutal" style="flex:1;height:0.75rem">
+              <div class="progress-brutal-fill{% if rs.failed > 0 %} red{% elif rs.pct == 100 %} green{% endif %}" style="width:{{ rs.pct }}%"></div>
+            </div>
+            <span class="emes-text-xs emes-mono" style="min-width:3rem;text-align:right">{{ rs.closed }}/{{ rs.total }}</span>
+            {% if rs.failed > 0 %}
+              <span class="emes-text-xs emes-text-error">{{ rs.failed }} failed</span>
+            {% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      {% else %}
+        <div style="padding:2rem;text-align:center;color:var(--emes-gray-500)">
+          No roots yet. Run <code>loopfarm run "your prompt"</code> to create one.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

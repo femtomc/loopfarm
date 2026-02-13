@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% set active_nav = "roles" %}
+
+{% block title %}loopfarm — roles{% endblock %}
+
+{% block content %}
+<div style="padding:1rem">
+  <div class="emes-widget">
+    <div class="emes-widget-header">
+      <span>Role Catalog</span>
+      <span class="emes-widget-header-count">{{ roles|length }}</span>
+    </div>
+    <div class="emes-widget-body">
+      {% if roles %}
+      <table class="emes-table emes-table-dense" style="box-shadow:none">
+        <thead>
+          <tr>
+            <th>name</th>
+            <th>description</th>
+            <th>cli</th>
+            <th>model</th>
+            <th>reasoning</th>
+            <th>prompt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in roles %}
+          <tr>
+            <td><span style="font-weight:600">{{ role.name }}</span></td>
+            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">{{ role.description[:100] }}</td>
+            <td><code>{{ role.cli or '-' }}</code></td>
+            <td><code>{{ role.model or '-' }}</code></td>
+            <td>{{ role.reasoning or '-' }}</td>
+            <td class="emes-mono" style="font-size:0.7rem">{{ role.prompt_path or '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <div style="padding:2rem;text-align:center;color:var(--emes-gray-500)">
+          No roles defined. Create <code>.loopfarm/roles/*.md</code> files.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

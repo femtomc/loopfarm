@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% set active_nav = "editor" %}
+{% from "_tree_node.html" import render_node %}
+
+{% block title %}loopfarm — {{ root.title[:40] }}{% endblock %}
+
+{% block content %}
+<div class="editor-toolbar">
+  <div class="emes-breadcrumb" id="breadcrumb">
+    <a href="/">dashboard</a>
+    <span class="emes-breadcrumb-sep">/</span>
+    <span id="breadcrumb-trail">{{ root.title[:60] }}</span>
+  </div>
+  <div class="emes-flex emes-gap-2 emes-items-center">
+    <span class="emes-sku" style="font-size:0.6rem" id="runner-status">{{ runner_state.status }}</span>
+    <button class="emes-btn-sm emes-btn-green" id="btn-run" onclick="startRunner()">run</button>
+    <button class="emes-btn-sm" id="btn-pause" onclick="pauseRunner()">pause</button>
+  </div>
+</div>
+
+<div class="editor-layout">
+  <div class="editor-tree-pane" id="tree-pane">
+    <div class="tree-container" id="tree-container">
+      {{ render_node(tree) }}
+    </div>
+  </div>
+  <div class="editor-detail-pane" id="detail-pane">
+    {% include "_detail_panel.html" %}
+  </div>
+</div>
+
+<script>
+  window.__rootId = "{{ root.id }}";
+</script>
+{% endblock %}

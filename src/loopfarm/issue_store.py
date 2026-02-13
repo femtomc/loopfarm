@@ -233,7 +233,18 @@ class IssueStore:
         return result
 
     def validate(self, root_id: str) -> ValidationResult:
-        """Check if the DAG rooted at root_id is complete."""
+        """Check if the DAG rooted at root_id is complete.
+
+        Completion semantics:
+        - ``expanded`` is a *delegation* outcome: the issue itself finished
+          (decomposition), but its logical completion flows through to its
+          descendants.  Expanded nodes are transparent when determining
+          whether work remains.
+        - All other closed outcomes (``success``, ``failure``, ``skipped``)
+          are *terminal*: the work at that node is done.
+        - The DAG is final when every non-expanded node in the subtree is
+          terminally closed (or a failure is detected anywhere).
+        """
         rows = self._load()
         by_id = {row["id"]: row for row in rows}
         ids = set(self.subtree_ids(root_id))
@@ -241,19 +252,41 @@ class IssueStore:
         root = by_id.get(root_id)
         if root is None:
             return ValidationResult(is_final=True, reason="root not found")
-        if root["status"] == "closed":
-            return ValidationResult(is_final=True, reason="root closed")
 
-        failed = [issue_id for issue_id in ids if by_id.get(issue_id, {}).get("outcome") == "failure"]
-        if failed:
-            return ValidationResult(is_final=True, reason=f"failures: {','.join(failed)}")
-
-        all_closed = all(
-            by_id[issue_id]["status"] == "closed"
+        # Failures anywhere in the subtree are an immediate hard stop.
+        failed = [
+            issue_id
             for issue_id in ids
-            if issue_id != root_id and issue_id in by_id
-        )
-        if all_closed and len(ids) > 1:
-            return ValidationResult(is_final=False, reason="all children closed, root still open")
+            if by_id.get(issue_id, {}).get("outcome") == "failure"
+        ]
+        if failed:
+            return ValidationResult(
+                is_final=True, reason=f"failures: {','.join(failed)}"
+            )
+
+        # Collect issues that still need work.  Expanded nodes are
+        # transparent — they delegated to children and are not themselves
+        # "pending."  Every other non-closed issue counts as pending.
+        pending = [
+            issue_id
+            for issue_id in ids
+            if issue_id in by_id
+            and not (
+                by_id[issue_id]["status"] == "closed"
+                and by_id[issue_id].get("outcome") == "expanded"
+            )
+            and by_id[issue_id]["status"] != "closed"
+        ]
+
+        if not pending:
+            return ValidationResult(is_final=True, reason="all work completed")
+
+        # If only the root is pending and all descendants are done, signal
+        # that the root is ready to be closed by the next agent step.
+        if pending == [root_id] and len(ids) > 1:
+            return ValidationResult(
+                is_final=False,
+                reason="all children closed, root still open",
+            )
 
         return ValidationResult(is_final=False, reason="in progress")

@@ -12,8 +12,9 @@ from rich.console import Console
 from .backend import get_backend
 from .fmt import get_formatter
 from .prompt import read_prompt_meta, render
+from .forum_store import ForumStore
+from .issue_store import IssueStore
 from .spec import ExecutionSpec
-from .store import ForumStore, IssueStore
 
 
 @dataclass(frozen=True)

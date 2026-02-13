@@ -17,8 +17,9 @@ from rich.text import Text
 from . import __version__
 from .dag import DagRunner
 from .fmt import get_formatter
+from .forum_store import ForumStore
+from .issue_store import IssueStore
 from .prompt import list_roles_json
-from .store import ForumStore, IssueStore
 
 
 def _find_repo_root() -> Path:

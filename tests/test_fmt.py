@@ -27,7 +27,7 @@ def _emit(
     formatter.process_line(json.dumps(event))
 
 
-def test_codex_interactive_sections() -> None:
+def test_codex_tool_call_single_line() -> None:
     console, out = _console(force_terminal=True)
     fmt = CodexFormatter(console)
 
@@ -45,29 +45,14 @@ def test_codex_interactive_sections() -> None:
             },
         },
     )
-    _emit(
-        fmt,
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "item_1",
-                "type": "command_execution",
-                "command": "/usr/bin/zsh -lc 'echo hi'",
-                "aggregated_output": "hi\n",
-                "exit_code": 0,
-                "status": "completed",
-            },
-        },
-    )
 
     rendered = out.getvalue()
-    assert "stream" in rendered.lower()
-    assert "step 1" in rendered.lower()
-    assert "status" in rendered.lower()
-    assert "$ echo hi" in rendered
+    assert "bash echo hi" in rendered
+    # Single line per tool call
+    assert rendered.strip().count("\n") == 0
 
 
-def test_codex_noninteractive_plain_output_no_rich_artifacts() -> None:
+def test_codex_noninteractive_no_rich_artifacts() -> None:
     console, out = _console(force_terminal=False)
     fmt = CodexFormatter(console)
 
@@ -85,31 +70,35 @@ def test_codex_noninteractive_plain_output_no_rich_artifacts() -> None:
             },
         },
     )
+
+    rendered = out.getvalue()
+    assert "bash echo hi" in rendered
+    assert "\x1b[" not in rendered
+    assert not re.search(r"[╭╮╰╯│─]", rendered)
+
+
+def test_codex_summary_on_finish() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = CodexFormatter(console)
+
     _emit(
         fmt,
         {
             "type": "item.completed",
             "item": {
-                "id": "item_1",
-                "type": "command_execution",
-                "command": "/usr/bin/zsh -lc 'echo hi'",
-                "aggregated_output": "hi\n",
-                "exit_code": 0,
-                "status": "completed",
+                "id": "item_2",
+                "type": "agent_message",
+                "text": "Applying formatter updates.",
             },
         },
     )
+    fmt.finish()
 
     rendered = out.getvalue()
-    assert "stream: codex" in rendered
-    assert "step 1: start: $ echo hi" in rendered
-    assert "status: step 1 ok: $ echo hi" in rendered
-    assert "[hi]" in rendered
-    assert "\x1b[" not in rendered
-    assert not re.search(r"[╭╮╰╯│─]", rendered)
+    assert "Applying formatter updates." in rendered
 
 
-def test_codex_renders_reasoning_and_agent_messages() -> None:
+def test_codex_reasoning_suppressed() -> None:
     console, out = _console(force_terminal=False)
     fmt = CodexFormatter(console)
 
@@ -124,24 +113,12 @@ def test_codex_renders_reasoning_and_agent_messages() -> None:
             },
         },
     )
-    _emit(
-        fmt,
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "item_2",
-                "type": "agent_message",
-                "text": "Applying formatter updates.",
-            },
-        },
-    )
 
     rendered = out.getvalue()
-    assert "status: thinking: Planning output changes" in rendered
-    assert "stream: assistant: Applying formatter updates." in rendered
+    assert "Planning" not in rendered
 
 
-def test_opencode_noninteractive_plain_output() -> None:
+def test_opencode_tool_and_summary() -> None:
     console, out = _console(force_terminal=False)
     fmt = OpenCodeFormatter(console)
 
@@ -175,6 +152,30 @@ def test_opencode_noninteractive_plain_output() -> None:
     _emit(
         fmt,
         {
+            "type": "error",
+            "error": {
+                "name": "RateLimitError",
+                "data": {"message": "rate limited"},
+            },
+        },
+    )
+    fmt.finish()
+
+    rendered = out.getvalue()
+    assert "bash echo hi" in rendered
+    assert "Applied OpenCode backend updates." in rendered
+    assert "error: rate limited" in rendered
+    assert "\x1b[" not in rendered
+    assert not re.search(r"[╭╮╰╯│─]", rendered)
+
+
+def test_opencode_reasoning_suppressed() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = OpenCodeFormatter(console)
+
+    _emit(
+        fmt,
+        {
             "type": "reasoning",
             "part": {
                 "id": "part_3",
@@ -183,28 +184,12 @@ def test_opencode_noninteractive_plain_output() -> None:
             },
         },
     )
-    _emit(
-        fmt,
-        {
-            "type": "error",
-            "error": {
-                "name": "RateLimitError",
-                "data": {"message": "rate limited"},
-            },
-        },
-    )
 
     rendered = out.getvalue()
-    assert "stream: opencode" in rendered
-    assert "step 1: tool bash: echo hi" in rendered
-    assert "stream: assistant: Applied OpenCode backend updates." in rendered
-    assert "status: thinking: Planning tests" in rendered
-    assert "status: error: rate limited" in rendered
-    assert "\x1b[" not in rendered
-    assert not re.search(r"[╭╮╰╯│─]", rendered)
+    assert "Planning" not in rendered
 
 
-def test_pi_noninteractive_plain_output() -> None:
+def test_pi_tool_and_summary() -> None:
     console, out = _console(force_terminal=False)
     fmt = PiFormatter(console)
 
@@ -231,6 +216,31 @@ def test_pi_noninteractive_plain_output() -> None:
     _emit(
         fmt,
         {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "stopReason": "error",
+                "errorMessage": "rate limited",
+            },
+        },
+    )
+    fmt.finish()
+
+    rendered = out.getvalue()
+    assert "bash echo hi" in rendered
+    assert "Applied pi backend updates." in rendered
+    assert "error: rate limited" in rendered
+    assert "\x1b[" not in rendered
+    assert not re.search(r"[╭╮╰╯│─]", rendered)
+
+
+def test_pi_thinking_suppressed() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = PiFormatter(console)
+
+    _emit(
+        fmt,
+        {
             "type": "message_update",
             "message": {"role": "assistant"},
             "assistantMessageEvent": {
@@ -239,6 +249,15 @@ def test_pi_noninteractive_plain_output() -> None:
             },
         },
     )
+
+    rendered = out.getvalue()
+    assert "Planning" not in rendered
+
+
+def test_pi_tool_result_suppressed() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = PiFormatter(console)
+
     _emit(
         fmt,
         {
@@ -249,34 +268,15 @@ def test_pi_noninteractive_plain_output() -> None:
             "isError": False,
         },
     )
-    _emit(
-        fmt,
-        {
-            "type": "message_end",
-            "message": {
-                "role": "assistant",
-                "stopReason": "error",
-                "errorMessage": "rate limited",
-            },
-        },
-    )
 
     rendered = out.getvalue()
-    assert "stream: pi" in rendered
-    assert "step 1: tool bash: echo hi" in rendered
-    assert "stream: assistant: Applied pi backend updates." in rendered
-    assert "status: thinking: Planning tests" in rendered
-    assert "status: step 1 ok: bash [hi]" in rendered
-    assert "status: error: rate limited" in rendered
-    assert "\x1b[" not in rendered
-    assert not re.search(r"[╭╮╰╯│─]", rendered)
+    assert rendered.strip() == ""
 
 
-def test_gemini_noninteractive_plain_output() -> None:
+def test_gemini_tool_and_summary() -> None:
     console, out = _console(force_terminal=False)
     fmt = GeminiFormatter(console)
 
-    _emit(fmt, {"type": "init", "model": "gemini-2.5-pro"})
     _emit(
         fmt,
         {
@@ -298,6 +298,39 @@ def test_gemini_noninteractive_plain_output() -> None:
     _emit(
         fmt,
         {
+            "type": "result",
+            "status": "success",
+            "duration_ms": 1200,
+            "usage": {"totalTokens": 42},
+        },
+    )
+    fmt.finish()
+
+    rendered = out.getvalue()
+    assert "run_shell_command echo hi" in rendered
+    assert "Applied Gemini backend updates." in rendered
+    assert "success 1.2s tokens=42" in rendered
+    assert "\x1b[" not in rendered
+    assert not re.search(r"[╭╮╰╯│─]", rendered)
+
+
+def test_gemini_init_suppressed() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = GeminiFormatter(console)
+
+    _emit(fmt, {"type": "init", "model": "gemini-2.5-pro"})
+
+    rendered = out.getvalue()
+    assert rendered.strip() == ""
+
+
+def test_gemini_tool_result_suppressed() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = GeminiFormatter(console)
+
+    _emit(
+        fmt,
+        {
             "type": "tool_result",
             "tool_name": "run_shell_command",
             "tool_id": "tool_1",
@@ -305,28 +338,12 @@ def test_gemini_noninteractive_plain_output() -> None:
             "output": "hi\n",
         },
     )
-    _emit(
-        fmt,
-        {
-            "type": "result",
-            "status": "success",
-            "duration_ms": 1200,
-            "usage": {"totalTokens": 42},
-        },
-    )
 
     rendered = out.getvalue()
-    assert "stream: gemini" in rendered
-    assert "status: model: gemini-2.5-pro" in rendered
-    assert "step 1: tool run_shell_command: echo hi" in rendered
-    assert "stream: assistant: Applied Gemini backend updates." in rendered
-    assert "status: step 1 ok: run_shell_command [hi]" in rendered
-    assert "status: result: success 1.2s tokens=42" in rendered
-    assert "\x1b[" not in rendered
-    assert not re.search(r"[╭╮╰╯│─]", rendered)
+    assert rendered.strip() == ""
 
 
-def test_gemini_renders_error_status() -> None:
+def test_gemini_renders_error() -> None:
     console, out = _console(force_terminal=False)
     fmt = GeminiFormatter(console)
 
@@ -337,20 +354,12 @@ def test_gemini_renders_error_status() -> None:
             "error": {"message": "rate limited"},
         },
     )
-    _emit(
-        fmt,
-        {
-            "type": "result",
-            "status": "error",
-        },
-    )
 
     rendered = out.getvalue()
-    assert "status: error: rate limited" in rendered
-    assert "status: result: error" in rendered
+    assert "error: rate limited" in rendered
 
 
-def test_claude_interactive_sections() -> None:
+def test_claude_tool_call_single_line() -> None:
     console, out = _console(force_terminal=True)
     fmt = ClaudeFormatter(console)
 
@@ -362,18 +371,27 @@ def test_claude_interactive_sections() -> None:
             "input": {"command": "ls -la"},
         },
     )
+
+    rendered = out.getvalue()
+    assert "Bash ls -la" in rendered
+    assert rendered.strip().count("\n") == 0
+
+
+def test_claude_summary_on_finish() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = ClaudeFormatter(console)
+
     _emit(fmt, {"type": "assistant", "message": "Working on it..."})
     _emit(fmt, {"type": "result", "cost_usd": 0.0012, "duration_ms": 900})
     fmt.finish()
 
     rendered = out.getvalue()
-    assert "stream" in rendered.lower()
-    assert "step 1" in rendered.lower()
-    assert "tool bash" in rendered.lower()
-    assert "status" in rendered.lower()
+    assert "Working on it..." in rendered
+    assert "$0.0012" in rendered
+    assert "0.9s" in rendered
 
 
-def test_claude_noninteractive_plain_output_no_rich_artifacts() -> None:
+def test_claude_noninteractive_no_rich_artifacts() -> None:
     console, out = _console(force_terminal=False)
     fmt = ClaudeFormatter(console)
 
@@ -388,8 +406,7 @@ def test_claude_noninteractive_plain_output_no_rich_artifacts() -> None:
     _emit(fmt, {"type": "error", "error": "boom"})
 
     rendered = out.getvalue()
-    assert "stream: claude" in rendered
-    assert "step 1: tool Read: src/loopfarm/fmt.py" in rendered
-    assert "status: error: boom" in rendered
+    assert "Read src/loopfarm/fmt.py" in rendered
+    assert "error: boom" in rendered
     assert "\x1b[" not in rendered
     assert not re.search(r"[╭╮╰╯│─]", rendered)

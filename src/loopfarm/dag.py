@@ -64,8 +64,7 @@ class DagRunner:
             issue = candidates[0]
             issue_id = issue["id"]
             self.console.print(
-                f"\n[bold]Step {step + 1}:[/bold] {issue['title']} "
-                f"[dim]({issue_id})[/dim]"
+                f"\n[bold]step {step + 1}[/bold] [dim]{issue_id}[/dim] {issue['title']}"
             )
 
             # 3. Claim
@@ -132,7 +131,7 @@ class DagRunner:
 
             # 6. Run backend
             self.console.print(
-                f"  [dim]{cli} model={model} reasoning={reasoning}[/dim]"
+                f"  [dim]{cli} {model} reasoning={reasoning}[/dim]"
             )
             backend = get_backend(cli)
             formatter = get_formatter(cli, self.console)

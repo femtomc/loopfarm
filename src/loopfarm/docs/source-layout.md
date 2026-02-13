@@ -10,12 +10,13 @@ src/loopfarm/
 ├── forum.py                # forum command + service facade
 ├── init_cmd.py             # scaffold command (.loopfarm/orchestrator.md + roles)
 ├── runner.py               # single-pass role runner used by orchestration
+├── execution_spec.py       # execution_spec schema + normalization
 ├── runtime/                # orchestration internals
 │   ├── issue_dag_events.py       # canonical DAG event contracts
-│   ├── issue_dag_execution.py    # candidate selection + role execution adapter
-│   ├── issue_dag_orchestrator.py # route planning/execution by granularity
+│   ├── issue_dag_execution.py    # candidate selection + execution_spec adapter
+│   ├── issue_dag_orchestrator.py # route by execution_spec presence
 │   ├── issue_dag_runner.py       # deterministic select->execute->maintain loop
-│   ├── roles.py                  # role catalog from .loopfarm/roles/*.md
+│   ├── roles.py                  # role catalog + frontmatter defaults
 │   ├── control.py                # pause/resume/stop control-plane logic
 │   ├── events.py                 # event datatypes
 │   ├── forward_report.py         # forward-pass diff/report capture
@@ -33,5 +34,6 @@ User programmability intentionally stays minimal:
 
 - `.loopfarm/orchestrator.md`
 - `.loopfarm/roles/*.md`
+- issue `execution_spec` payloads (materialized from roles or set directly)
 
 The DAG orchestration runtime uses issues + forum as the canonical control/event substrate.

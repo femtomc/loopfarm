@@ -66,12 +66,12 @@ def test_build_node_execute_event_validates_and_normalizes_payload() -> None:
         team_source="issue_tag",
         team_source_issue_id="loopfarm-leaf",
         team_source_tag="team:platform",
-        extra={"route": "execution"},
+        extra={"route": "spec_execution"},
     )
     assert payload["kind"] == NODE_EXECUTE
     assert payload["id"] == "loopfarm-leaf"
     assert payload["tags"] == ["node:agent", "granularity:atomic"]
-    assert payload["route"] == "execution"
+    assert payload["route"] == "spec_execution"
     assert validate_issue_dag_event(payload) == []
 
 

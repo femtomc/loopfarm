@@ -6,6 +6,7 @@ import re
 
 
 INCLUDE_RE = re.compile(r"\{\{\>\s*([^}]+?)\s*\}\}")
+FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class TemplateContext:
 
 def render_template(path: Path, ctx: TemplateContext) -> str:
     content = _render_with_includes(path, seen=set())
+    content = _strip_frontmatter(content)
     return (
         content.replace("{{PROMPT}}", ctx.prompt)
         .replace("{{SESSION}}", ctx.session)
@@ -37,3 +39,10 @@ def _render_with_includes(path: Path, *, seen: set[Path]) -> str:
         return _render_with_includes(include_path, seen=seen.copy())
 
     return INCLUDE_RE.sub(include_repl, content)
+
+
+def _strip_frontmatter(content: str) -> str:
+    match = FRONTMATTER_RE.match(content)
+    if match is None:
+        return content
+    return content[match.end() :]

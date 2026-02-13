@@ -4,27 +4,43 @@ Loopfarm minimal-core does not use program/team TOML routing. Instead, each
 orchestration **step** selects one ready leaf issue and routes it to exactly one
 prompt surface:
 
-- **planning**: `.loopfarm/orchestrator.md` (decompose a non-atomic leaf)
-- **execution**: `.loopfarm/roles/<role>.md` (execute an atomic leaf)
+- **orchestrator_planning**: `.loopfarm/orchestrator.md` (decompose a leaf without `execution_spec`)
+- **spec_execution**: prompt path declared in issue `execution_spec` (usually `.loopfarm/roles/<role>.md`)
 
 ## Routing Rules
 
 Given an issue with tags:
 
-- If `granularity:atomic` is **absent** → `route=planning` (decompose), and the
+- If `execution_spec` is **absent** → `route=orchestrator_planning`, and the
   issue must end with `outcome=expanded`.
-- If `granularity:atomic` is **present** → `route=execution` (run a role prompt),
+- If `execution_spec` is **present** → `route=spec_execution`,
   and the issue must end with `outcome in {success,failure,skipped}` (never
   `expanded`).
 
 ## Role Resolution (Execution Route)
 
-Role selection is deterministic:
+Role selection is deterministic from `execution_spec.role`.
+The recommended workflow is to materialize specs from role docs:
 
-1. Use a single `role:<name>` tag if present.
-2. Else default to `worker` when `.loopfarm/roles/worker.md` exists.
-3. Else use the only available role doc if exactly one exists.
-4. Else fail fast and require `role:<name>`.
+1. Define role defaults/frontmatter in `.loopfarm/roles/<role>.md`.
+2. Run `loopfarm roles assign <issue> --team <name> --lead <role>`.
+3. The command writes metadata tags/events and stores normalized `execution_spec`.
+
+## Runtime Config Source
+
+Execution/runtime knobs come from `.loopfarm` markdown frontmatter only:
+
+- `.loopfarm/orchestrator.md` frontmatter configures `orchestrator_planning`.
+- `.loopfarm/roles/<role>.md` frontmatter is materialized into issue
+  `execution_spec` for `spec_execution`.
+
+Common keys:
+
+- `cli`
+- `model`
+- `reasoning`
+- `loop_steps`
+- `termination_phase`
 
 ## Team Label (Optional Metadata)
 
@@ -39,14 +55,16 @@ Non-atomic leaf (planning/decomposition):
 
 ```text
 tags: [node:agent]
-route: planning
+execution_spec: null
+route: orchestrator_planning
 expected: create children + wire parent/blocks + close outcome=expanded
 ```
 
 Atomic leaf (execution/worker):
 
 ```text
-tags: [node:agent, granularity:atomic]
-route: execution
+tags: [node:agent]
+execution_spec: {role: worker, ...}
+route: spec_execution
 expected: implement + close outcome=success|failure|skipped
 ```

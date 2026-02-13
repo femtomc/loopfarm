@@ -46,7 +46,7 @@ _TOPIC_SPECS = (
     DocTopicSpec(
         topic="steps-grammar",
         file_name="phase-plan.md",
-        description="Routing rules for planning vs execution in issue-DAG orchestration.",
+        description="Routing rules for orchestrator_planning vs spec_execution.",
     ),
     DocTopicSpec(
         topic="implementation-state-machine",

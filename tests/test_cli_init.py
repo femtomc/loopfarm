@@ -22,10 +22,14 @@ def test_init_creates_minimal_orchestration_scaffold(
     assert (tmp_path / ".loopfarm" / "programs").exists() is False
 
     orchestrator_text = orchestrator.read_text(encoding="utf-8")
+    assert orchestrator_text.startswith("---\n")
+    assert "cli: codex" in orchestrator_text
     assert "hierarchical orchestrator" in orchestrator_text
     assert "outcome=expanded" in orchestrator_text
 
     worker_text = worker.read_text(encoding="utf-8")
+    assert worker_text.startswith("---\n")
+    assert "cli: codex" in worker_text
     assert "atomic issue" in worker_text
     assert "success" in worker_text
 

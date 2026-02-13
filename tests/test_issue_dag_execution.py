@@ -108,10 +108,17 @@ def _write_role(repo_root: Path, role: str) -> None:
     path.write_text(f"# {role}\n", encoding="utf-8")
 
 
-def _write_orchestrator_prompt(repo_root: Path) -> None:
+def _write_orchestrator_prompt(
+    repo_root: Path,
+    *,
+    frontmatter: str | None = None,
+) -> None:
     path = repo_root / ".loopfarm" / "orchestrator.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("# orchestrator\n", encoding="utf-8")
+    prefix = ""
+    if frontmatter:
+        prefix = f"---\n{frontmatter.strip()}\n---\n"
+    path.write_text(f"{prefix}# orchestrator\n", encoding="utf-8")
 
 
 def _claim(issue_id: str, *, tags: list[str], claimed_at: int = 100) -> dict[str, Any]:
@@ -126,6 +133,14 @@ def _claim(issue_id: str, *, tags: list[str], claimed_at: int = 100) -> dict[str
             "updated_at": claimed_at,
             "tags": tags,
         },
+    }
+
+
+def _execution_spec(role: str) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "role": role,
+        "prompt_path": f".loopfarm/roles/{role}.md",
     }
 
 
@@ -223,13 +238,93 @@ def test_node_execution_adapter_routes_planning_to_orchestrator_prompt(tmp_path:
             mode="claim",
             claim_timestamp=123,
             issue={"id": "loopfarm-a", "tags": ["node:agent"]},
-            metadata={"route": "planning"},
+            metadata={"route": "orchestrator_planning"},
         ),
         root_id="loopfarm-root",
     )
 
     assert result.success is True
     assert captured_prompt_override == [("role", str(tmp_path / ".loopfarm" / "orchestrator.md"))]
+
+
+def test_node_execution_adapter_reads_orchestrator_frontmatter_defaults(
+    tmp_path: Path,
+) -> None:
+    _write_orchestrator_prompt(
+        tmp_path,
+        frontmatter=(
+            "cli: claude\n"
+            "model: orchestrator-model\n"
+            "reasoning: medium\n"
+            "loop_steps: planning*2,review\n"
+            "termination_phase: review"
+        ),
+    )
+    _write_role(tmp_path, "worker")
+    issue_state = FakeIssueExecutionClient(
+        rows={
+            "loopfarm-a": {
+                "id": "loopfarm-a",
+                "title": "Plan",
+                "body": "body",
+                "status": "in_progress",
+                "outcome": None,
+                "tags": ["node:agent"],
+            }
+        }
+    )
+    forum = FakeForumClient()
+    captured: dict[str, Any] = {}
+
+    def fake_run_session(cfg, _session_id: str) -> int:
+        captured["loop_steps"] = cfg.loop_steps
+        captured["termination_phase"] = cfg.termination_phase
+        captured["phase_cli_overrides"] = cfg.phase_cli_overrides
+        captured["phase_prompt_overrides"] = cfg.phase_prompt_overrides
+        captured["phase_models"] = cfg.phase_models
+        issue_state.rows["loopfarm-a"]["status"] = "closed"
+        issue_state.rows["loopfarm-a"]["outcome"] = "expanded"
+        return 0
+
+    adapter = IssueDagNodeExecutionAdapter(
+        repo_root=tmp_path,
+        issue=issue_state,
+        forum=forum,
+        run_session=fake_run_session,
+        session_id_factory=lambda: "sess-frontmatter",
+    )
+
+    result = adapter.execute_selection(
+        NodeExecutionSelection(
+            issue_id="loopfarm-a",
+            team="dynamic",
+            role="orchestrator",
+            program="orchestrator",
+            mode="claim",
+            claim_timestamp=123,
+            issue={"id": "loopfarm-a", "tags": ["node:agent"]},
+            metadata={"route": "orchestrator_planning"},
+        ),
+        root_id="loopfarm-root",
+    )
+
+    assert result.success is True
+    assert captured["loop_steps"] == (("planning", 2), ("review", 1))
+    assert captured["termination_phase"] == "review"
+    assert captured["phase_cli_overrides"] == (
+        ("planning", "claude"),
+        ("review", "claude"),
+    )
+    assert captured["phase_prompt_overrides"] == (
+        ("planning", str(tmp_path / ".loopfarm" / "orchestrator.md")),
+        ("review", str(tmp_path / ".loopfarm" / "orchestrator.md")),
+    )
+    assert captured["phase_models"][0][0] == "planning"
+    assert captured["phase_models"][0][1].model == "orchestrator-model"
+    assert captured["phase_models"][0][1].reasoning == "medium"
+    assert captured["phase_models"][1][0] == "review"
+    assert captured["phase_models"][1][1].model == "orchestrator-model"
+    assert captured["phase_models"][1][1].reasoning == "medium"
 
 
 def test_node_execution_adapter_routes_execution_to_role_doc(tmp_path: Path) -> None:
@@ -243,7 +338,8 @@ def test_node_execution_adapter_routes_execution_to_role_doc(tmp_path: Path) -> 
                 "body": "body",
                 "status": "in_progress",
                 "outcome": None,
-                "tags": ["node:agent", "granularity:atomic"],
+                "tags": ["node:agent"],
+                "execution_spec": _execution_spec("worker"),
             }
         }
     )
@@ -272,8 +368,15 @@ def test_node_execution_adapter_routes_execution_to_role_doc(tmp_path: Path) -> 
             program="role:worker",
             mode="claim",
             claim_timestamp=123,
-            issue={"id": "loopfarm-a", "tags": ["node:agent", "granularity:atomic"]},
-            metadata={"route": "execution"},
+            issue={
+                "id": "loopfarm-a",
+                "tags": ["node:agent"],
+                "execution_spec": _execution_spec("worker"),
+            },
+            metadata={
+                "route": "spec_execution",
+                "execution_spec": _execution_spec("worker"),
+            },
         ),
         root_id="loopfarm-root",
     )
@@ -323,7 +426,7 @@ def test_node_execution_adapter_enforces_planning_postcondition(tmp_path: Path) 
             mode="claim",
             claim_timestamp=123,
             issue={"id": "loopfarm-a", "tags": ["node:agent"]},
-            metadata={"route": "planning"},
+            metadata={"route": "orchestrator_planning"},
         ),
         root_id="loopfarm-root",
     )
@@ -366,7 +469,7 @@ def test_node_execution_adapter_requires_orchestrator_prompt_for_planning(
                 mode="claim",
                 claim_timestamp=123,
                 issue={"id": "loopfarm-a", "tags": ["node:agent"]},
-                metadata={"route": "planning"},
+                metadata={"route": "orchestrator_planning"},
             ),
             root_id="loopfarm-root",
         )

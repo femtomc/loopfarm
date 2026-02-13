@@ -160,6 +160,7 @@ class Issue:
         status: str = "open",
         priority: int = 3,
         tags: list[str] | None = None,
+        execution_spec: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self.store.create(
             title,
@@ -167,6 +168,7 @@ class Issue:
             status=status,
             priority=priority,
             tags=tags,
+            execution_spec=execution_spec,
         )
 
     def set_status(
@@ -197,6 +199,8 @@ class Issue:
         priority: int | None = None,
         outcome: str | None = None,
         outcome_provided: bool = False,
+        execution_spec: dict[str, Any] | None = None,
+        execution_spec_provided: bool = False,
     ) -> dict[str, Any]:
         return self.store.update(
             issue_id,
@@ -206,6 +210,8 @@ class Issue:
             priority=priority,
             outcome=outcome,
             outcome_provided=outcome_provided,
+            execution_spec=execution_spec,
+            execution_spec_provided=execution_spec_provided,
         )
 
     def delete(self, issue_id: str) -> dict[str, Any]:
@@ -231,6 +237,23 @@ class Issue:
 
     def remove_tag(self, issue_id: str, tag: str) -> dict[str, Any]:
         return self.store.remove_tag(issue_id, tag)
+
+    def get_execution_spec(self, issue_id: str) -> dict[str, Any] | None:
+        row = self.store.get(issue_id)
+        if row is None:
+            raise ValueError(f"issue not found: {issue_id}")
+        spec = row.get("execution_spec")
+        if isinstance(spec, dict):
+            return dict(spec)
+        return None
+
+    def set_execution_spec(
+        self, issue_id: str, execution_spec: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.store.set_execution_spec(issue_id, execution_spec)
+
+    def clear_execution_spec(self, issue_id: str) -> dict[str, Any]:
+        return self.store.clear_execution_spec(issue_id)
 
 
 def _to_int(value: object) -> int | None:
@@ -355,6 +378,11 @@ def _selection_payload(selection: NodeExecutionSelection) -> dict[str, Any]:
         "created_at": _to_int(selection.issue.get("created_at")),
         "updated_at": _to_int(selection.issue.get("updated_at")),
         "tags": [str(tag) for tag in selection.issue.get("tags") or []],
+        "execution_spec": (
+            selection.metadata.get("execution_spec")
+            if selection.metadata.get("execution_spec") is not None
+            else selection.issue.get("execution_spec")
+        ),
     }
     return {
         "id": selection.issue_id,
@@ -591,6 +619,10 @@ def _print_issue_details(issue: dict[str, Any]) -> None:
     print(f"created: {_format_time(issue.get('created_at'))}")
     print(f"updated: {_format_time(issue.get('updated_at'))}")
     print(f"outcome: {issue.get('outcome') or '-'}")
+    print(
+        "execution_spec: "
+        + ("set" if isinstance(issue.get("execution_spec"), dict) else "-")
+    )
 
     body = str(issue.get("body") or "").strip()
     if body:
@@ -788,6 +820,11 @@ def _print_issue_details_rich(issue: dict[str, Any]) -> None:
             f"created: {_format_time(issue.get('created_at'))}",
             f"updated: {_format_time(issue.get('updated_at'))}",
             f"tags: {tags}",
+            (
+                "execution_spec: set"
+                if isinstance(issue.get("execution_spec"), dict)
+                else "execution_spec: -"
+            ),
         ]
     )
 
@@ -859,8 +896,12 @@ def _print_help(*, output_mode: str) -> None:
                         "loopfarm issue dep add <src> <type> <dst>",
                     ),
                     (
-                        "edit routing tags",
+                        "edit metadata tags",
                         "loopfarm issue tag add/remove <id> <tag>",
+                    ),
+                    (
+                        "set execution spec",
+                        "loopfarm issue spec set <id> --file <path>.json",
                     ),
                 ),
             ),
@@ -882,6 +923,10 @@ def _print_help(*, output_mode: str) -> None:
                     ("deps <id>", "show dependency relations around an issue (stable)"),
                     ("dep add <src> <type> <dst>", "create dependency relation (stable)"),
                     ("tag add/remove <id> <tag>", "manage issue tags (stable)"),
+                    (
+                        "spec show|set|clear <id>",
+                        "manage issue execution specs (stable)",
+                    ),
                     (
                         "orchestrate-run --root <id>",
                         "deterministic select→execute→maintain loop (stable)",
@@ -1240,6 +1285,31 @@ def _build_parser() -> argparse.ArgumentParser:
     tag_rm.add_argument("tag", help="Tag value")
     tag_rm.add_argument("--json", action="store_true", help="Output JSON")
 
+    spec = sub.add_parser("spec", help="Execution spec operations")
+    spec_sub = spec.add_subparsers(dest="spec_cmd", required=True, metavar="spec_cmd")
+    spec_show = spec_sub.add_parser("show", help="Show execution spec for one issue")
+    spec_show.add_argument("id", help="Issue id")
+    spec_show.add_argument("--json", action="store_true", help="Output JSON")
+    add_output_mode_argument(spec_show)
+
+    spec_set = spec_sub.add_parser("set", help="Set execution spec for one issue")
+    spec_set.add_argument("id", help="Issue id")
+    spec_set.add_argument(
+        "--value",
+        help="JSON object literal for execution spec",
+    )
+    spec_set.add_argument(
+        "--file",
+        help="Path to JSON file containing execution spec",
+    )
+    spec_set.add_argument("--json", action="store_true", help="Output JSON")
+
+    spec_clear = spec_sub.add_parser(
+        "clear", help="Clear execution spec for one issue"
+    )
+    spec_clear.add_argument("id", help="Issue id")
+    spec_clear.add_argument("--json", action="store_true", help="Output JSON")
+
     return p
 
 
@@ -1266,6 +1336,8 @@ def main(argv: list[str] | None = None) -> None:
         "comments",
         "validate-dag",
     }
+    if args.command == "spec" and getattr(args, "spec_cmd", None) == "show":
+        create = False
     issue = Issue.from_workdir(Path.cwd(), create=create)
     output_mode = "plain"
     if hasattr(args, "output"):
@@ -1623,6 +1695,67 @@ def main(argv: list[str] | None = None) -> None:
                 _emit_json(row)
             else:
                 print(row["id"])
+            return
+
+        if args.command == "spec" and args.spec_cmd == "show":
+            payload = {
+                "id": args.id,
+                "execution_spec": issue.get_execution_spec(args.id),
+            }
+            if args.json:
+                _emit_json(payload)
+            else:
+                spec_payload = payload["execution_spec"]
+                if output_mode == "rich":
+                    console = make_console("rich")
+                    if spec_payload is None:
+                        render_panel(console, "(none)", title=f"Execution Spec: {args.id}")
+                    else:
+                        render_panel(
+                            console,
+                            json.dumps(spec_payload, ensure_ascii=False, indent=2),
+                            title=f"Execution Spec: {args.id}",
+                        )
+                else:
+                    if spec_payload is None:
+                        print("(none)")
+                    else:
+                        print(json.dumps(spec_payload, ensure_ascii=False, indent=2))
+            return
+
+        if args.command == "spec" and args.spec_cmd == "set":
+            value_text = str(args.value or "").strip()
+            file_text = str(args.file or "").strip()
+            if bool(value_text) == bool(file_text):
+                raise ValueError("provide exactly one of --value or --file")
+            if file_text:
+                value_text = Path(file_text).read_text(encoding="utf-8")
+            try:
+                payload = json.loads(value_text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid execution spec JSON: {exc}") from exc
+
+            row = issue.set_execution_spec(args.id, payload)
+            out = {
+                "id": str(row.get("id") or args.id),
+                "execution_spec": row.get("execution_spec"),
+            }
+            if args.json:
+                _emit_json(out)
+            else:
+                print(f"set execution_spec for {out['id']}")
+            return
+
+        if args.command == "spec" and args.spec_cmd == "clear":
+            row = issue.clear_execution_spec(args.id)
+            out = {
+                "id": str(row.get("id") or args.id),
+                "execution_spec": row.get("execution_spec"),
+            }
+            if args.json:
+                _emit_json(out)
+            else:
+                print(f"cleared execution_spec for {out['id']}")
             return
 
         if args.command == "deps":

@@ -108,15 +108,15 @@ def _selection(issue_id: str) -> NodeExecutionSelection:
         issue_id=issue_id,
         team="dynamic",
         role="worker",
-        program="role:worker",
+        program="spec:worker",
         mode="claim",
         claim_timestamp=100,
         issue={
             "id": issue_id,
             "status": "in_progress",
-            "tags": ["node:agent", "granularity:atomic"],
+            "tags": ["node:agent"],
         },
-        metadata={"route": "execution"},
+        metadata={"route": "spec_execution"},
     )
 
 
@@ -131,7 +131,7 @@ def _result(
         root_id="loopfarm-root",
         team="dynamic",
         role="worker",
-        program="role:worker",
+        program="spec:worker",
         mode="claim",
         session_id=f"session-{issue_id}",
         started_at=10,

@@ -4,21 +4,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..execution_spec import ExecutionSpec, parse_execution_spec
 from .issue_dag_execution import (
     DEFAULT_RUN_TOPIC,
     IssueDagExecutionPlanner,
     NodeExecutionSelection,
     ResumeMode,
 )
-from .roles import ROLE_TAG_PREFIX, RoleCatalog
+from .roles import RoleCatalog
 
 
-ATOMIC_TAG = "granularity:atomic"
 TEAM_TAG_PREFIX = "team:"
 DEFAULT_EXECUTION_TAGS = ("node:agent",)
-DEFAULT_EXECUTION_ROLE = "worker"
 DEFAULT_PLANNING_ROLE = "orchestrator"
 DEFAULT_TEAM_LABEL = "dynamic"
+ROUTE_SPEC_EXECUTION = "spec_execution"
+ROUTE_ORCHESTRATOR_PLANNING = "orchestrator_planning"
 
 
 @dataclass(frozen=True)
@@ -47,9 +48,9 @@ class IssueDagOrchestrator:
 
     This orchestrator serves as the "system 2" process that:
     1. Selects the next ready leaf issue from the DAG.
-    2. Decides whether the issue is granular enough for execution:
-       - If tagged `granularity:atomic`, routes to the worker role for execution.
-       - If not atomic, routes to `.loopfarm/orchestrator.md` for decomposition.
+    2. Routes to exactly one mode:
+       - If `execution_spec` is set, routes to spec execution.
+       - Otherwise routes to `.loopfarm/orchestrator.md` for decomposition/planning.
     3. Assembles role-doc context for the selected route.
     4. Recursively repeats this process (via passes) to drive the DAG to completion.
     """
@@ -111,19 +112,37 @@ class IssueDagOrchestrator:
             return None
 
         team_name = self._resolve_team_label(issue_row)
-        role, role_source, route = self._resolve_role(issue_row)
+        route, spec = self._resolve_route(issue_row)
         selected_prompt_path: Path
-        if route == "planning":
+        role: str
+        role_source: str
+        spec_payload: dict[str, Any] | None = None
+        if route == ROUTE_ORCHESTRATOR_PLANNING:
             selected_prompt_path = self.repo_root / ".loopfarm" / "orchestrator.md"
             if not selected_prompt_path.exists() or not selected_prompt_path.is_file():
                 raise ValueError(
                     "missing orchestrator prompt: .loopfarm/orchestrator.md"
-            )
+                )
+            role = DEFAULT_PLANNING_ROLE
+            role_source = "orchestrator.prompt"
             program = "orchestrator"
         else:
-            role_doc = self._roles.require(role=role)
-            selected_prompt_path = role_doc.source_path
-            program = self._program_label(role_doc.role)
+            if spec is None:
+                raise ValueError(
+                    f"missing execution_spec for issue {issue_id} on execution route"
+                )
+            selected_prompt_path = spec.resolved_prompt_path(repo_root=self.repo_root)
+            if not selected_prompt_path.exists() or not selected_prompt_path.is_file():
+                raise ValueError(
+                    "missing execution spec prompt: "
+                    f"{self._format_path(selected_prompt_path)}"
+                )
+            role = spec.role
+            role_source = "execution_spec"
+            if spec.team:
+                team_name = spec.team
+            program = f"spec:{spec.role}"
+            spec_payload = spec.to_dict()
         team_assembly = self._assemble_team(
             team_name=team_name,
             selected_role=role,
@@ -146,6 +165,7 @@ class IssueDagOrchestrator:
                 "route": route,
                 "role_source": role_source,
                 "team_assembly": team_assembly,
+                "execution_spec": spec_payload,
             },
         )
 
@@ -232,50 +252,21 @@ class IssueDagOrchestrator:
             validation=dict(validation),
         )
 
-    def _resolve_role(
+    def _resolve_route(
         self,
         issue_row: dict[str, Any],
-    ) -> tuple[str, str, str]:
-        tags = [
-            str(tag).strip() for tag in issue_row.get("tags") or [] if str(tag).strip()
-        ]
+    ) -> tuple[str, ExecutionSpec | None]:
+        raw_spec = issue_row.get("execution_spec")
+        if raw_spec is None:
+            return (ROUTE_ORCHESTRATOR_PLANNING, None)
         issue_id = str(issue_row.get("id") or "").strip() or "<unknown>"
-        role_tags = [
-            tag
-            for tag in tags
-            if tag.startswith(ROLE_TAG_PREFIX) and tag[len(ROLE_TAG_PREFIX) :].strip()
-        ]
-        if len(role_tags) > 1:
-            joined = ", ".join(role_tags)
-            raise ValueError(f"multiple role:* tags on issue {issue_id}: {joined}")
-        explicit_role = (
-            role_tags[0][len(ROLE_TAG_PREFIX) :].strip().lower() if role_tags else ""
-        )
-        explicit_source = f"tag:{role_tags[0]}" if role_tags else ""
-
-        is_atomic = ATOMIC_TAG in tags
-        if not is_atomic:
-            _ = explicit_role
-            _ = explicit_source
-            return (DEFAULT_PLANNING_ROLE, "orchestrator.prompt", "planning")
-
-        if explicit_role:
-            return (explicit_role, explicit_source, "execution")
-        if self._roles.has_role(role=DEFAULT_EXECUTION_ROLE):
-            return (DEFAULT_EXECUTION_ROLE, "role.default.worker", "execution")
-
-        available_roles = self._roles.available_roles()
-        if len(available_roles) == 1:
-            return (available_roles[0], "role.only_available", "execution")
-        if available_roles:
-            joined = ", ".join(repr(role_name) for role_name in available_roles)
+        try:
+            spec = parse_execution_spec(raw_spec)
+        except ValueError as exc:
             raise ValueError(
-                "unable to resolve execution role from available docs; "
-                f"set role:<name> on issue (available roles: {joined})"
-            )
-        raise ValueError(
-            "no role docs available; add files under .loopfarm/roles such as worker.md"
-        )
+                f"invalid execution_spec on issue {issue_id}: {exc}"
+            ) from exc
+        return (ROUTE_SPEC_EXECUTION, spec)
 
     def _assemble_team(
         self,

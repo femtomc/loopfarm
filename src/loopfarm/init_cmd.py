@@ -7,7 +7,14 @@ from pathlib import Path
 from .ui import render_help, resolve_output_mode
 
 
-ORCHESTRATOR_PROMPT = """You are the hierarchical orchestrator for the issue DAG.
+ORCHESTRATOR_PROMPT = """---
+cli: codex
+model: gpt-5.2
+reasoning: xhigh
+loop_steps: role
+termination_phase: role
+---
+You are the hierarchical orchestrator for the issue DAG.
 
 User prompt:
 
@@ -24,7 +31,14 @@ User prompt:
 """
 
 
-ROLE_WORKER_PROMPT = """You are a worker role executing one atomic issue.
+ROLE_WORKER_PROMPT = """---
+cli: codex
+model: gpt-5.2
+reasoning: xhigh
+loop_steps: role
+termination_phase: role
+---
+You are a worker role executing one atomic issue.
 
 User prompt:
 

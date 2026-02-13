@@ -93,7 +93,6 @@ class IssueDagRunner:
             forum=forum,
             run_topic=run_topic,
             author=author,
-            roles=roles,
         )
 
     def run(

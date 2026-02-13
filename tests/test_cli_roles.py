@@ -94,12 +94,18 @@ def test_roles_assign_updates_issue_tags_and_posts_event(
     assert payload["team"] == "platform"
     assert payload["lead_role"] == "worker"
     assert payload["roles"] == ["worker", "reviewer"]
+    assert payload["execution_spec"]["role"] == "worker"
+    assert payload["execution_spec"]["prompt_path"] == ".loopfarm/roles/worker.md"
 
     updated = Issue.from_workdir(tmp_path).show(row["id"])
     assert updated is not None
     tags = set(str(tag) for tag in updated.get("tags") or [])
     assert "team:platform" in tags
     assert "role:worker" in tags
+    execution_spec = updated.get("execution_spec")
+    assert isinstance(execution_spec, dict)
+    assert execution_spec.get("role") == "worker"
+    assert execution_spec.get("team") == "platform"
 
     forum = Forum.from_workdir(tmp_path)
     issue_events = [json.loads(str(row["body"])) for row in forum.read(f"issue:{row['id']}", limit=10)]

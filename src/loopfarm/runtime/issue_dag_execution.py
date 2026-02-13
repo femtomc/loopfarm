@@ -6,22 +6,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
 
+from ..execution_spec import ExecutionSpec, parse_execution_spec
 from ..runner import CodexPhaseModel, LoopfarmConfig, run_loop
 from ..stores.session import SessionStore
 from ..stores.state import now_ms
-from ..util import env_value, new_session_id
+from ..util import new_session_id
 from .issue_dag_events import build_node_execute_event, build_node_result_event
-from .roles import RoleCatalog
+from .roles import RoleExecutionDefaults, read_execution_defaults
 
 
 DEFAULT_RUN_TOPIC = "loopfarm:feature:issue-dag-orchestration"
 ResumeMode = Literal["manual", "resume"]
 ExecutionMode = Literal["claim", "resume"]
 ROLE_PHASE = "role"
-DEFAULT_ROLE_CLI = "codex"
-DEFAULT_ROLE_MODEL = "gpt-5.2"
-DEFAULT_ROLE_REASONING = "xhigh"
+DEFAULT_ORCHESTRATOR_CLI = "codex"
+DEFAULT_ORCHESTRATOR_MODEL = "gpt-5.2"
+DEFAULT_ORCHESTRATOR_REASONING = "xhigh"
 DEFAULT_SELECTION_TEAM = "dynamic"
+ROUTE_SPEC_EXECUTION = "spec_execution"
+ROUTE_ORCHESTRATOR_PLANNING = "orchestrator_planning"
 _TERMINAL_STATUSES = frozenset({"closed", "duplicate"})
 _TERMINAL_OUTCOMES = frozenset({"success", "failure", "expanded", "skipped"})
 
@@ -116,7 +119,6 @@ class IssueDagNodeExecutionAdapter:
         forum: IssueDagSessionForumClient,
         run_topic: str = DEFAULT_RUN_TOPIC,
         author: str = "orchestrator",
-        roles: RoleCatalog | None = None,
         run_session: RunSelectionSessionFn | None = None,
         session_id_factory: Callable[[], str] = new_session_id,
     ) -> None:
@@ -125,7 +127,6 @@ class IssueDagNodeExecutionAdapter:
         self.forum = forum
         self.run_topic = run_topic
         self.author = author
-        self._roles = roles or RoleCatalog.from_repo(repo_root)
         self._run_session = run_session or self._default_run_session
         self._session_id_factory = session_id_factory
         self._session_store = SessionStore(forum)
@@ -145,11 +146,21 @@ class IssueDagNodeExecutionAdapter:
 
         resolved_root_id = self._resolve_root_id(root_id, selection=selection)
         issue_payload = self._normalize_issue_payload(selection.issue, fallback_id=issue_id)
-        prompt_path = self._prompt_path_for_selection(selection)
+        route = self._require_selection_route(selection)
+        execution_spec = self._selection_execution_spec(selection)
+        if route == ROUTE_SPEC_EXECUTION and execution_spec is None:
+            raise ValueError("selection.metadata.execution_spec is required")
+        prompt_path = self._prompt_path_for_selection(
+            selection,
+            route=route,
+            execution_spec=execution_spec,
+        )
         cfg = self._build_loop_config(
             team=selection.team,
             prompt_path=prompt_path,
             prompt=self._build_issue_prompt(issue_payload),
+            route=route,
+            execution_spec=execution_spec,
         )
 
         session_id = self._session_id_factory().strip()
@@ -157,7 +168,7 @@ class IssueDagNodeExecutionAdapter:
             raise ValueError("session_id_factory returned an empty session id")
 
         started_at = now_ms()
-        # Force one-pass execution for role docs by satisfying the runner's
+        # Force one-pass execution for selected prompt/spec by satisfying the runner's
         # termination check at the single role phase.
         self.forum.post_json(
             f"loopfarm:status:{session_id}",
@@ -199,7 +210,7 @@ class IssueDagNodeExecutionAdapter:
             issue_id=issue_id,
             status=status,
             outcome=outcome,
-            route=self._selection_route(selection),
+            route=route,
         )
         if postcondition_error is not None:
             error_parts.append(postcondition_error)
@@ -328,9 +339,14 @@ class IssueDagNodeExecutionAdapter:
             author=self.author,
         )
 
-    def _prompt_path_for_selection(self, selection: NodeExecutionSelection) -> Path:
-        route = self._selection_route(selection)
-        if route == "planning":
+    def _prompt_path_for_selection(
+        self,
+        selection: NodeExecutionSelection,
+        *,
+        route: str,
+        execution_spec: ExecutionSpec | None,
+    ) -> Path:
+        if route == ROUTE_ORCHESTRATOR_PLANNING:
             orchestrator_prompt = self.repo_root / ".loopfarm" / "orchestrator.md"
             if not orchestrator_prompt.exists() or not orchestrator_prompt.is_file():
                 raise ValueError(
@@ -338,11 +354,19 @@ class IssueDagNodeExecutionAdapter:
                 )
             return orchestrator_prompt
 
-        role_name = str(selection.role or "").strip().lower()
-        if not role_name:
-            raise ValueError("selection.role is required")
-        role_doc = self._roles.require(role=role_name)
-        return role_doc.source_path
+        if route == ROUTE_SPEC_EXECUTION:
+            if execution_spec is None:
+                raise ValueError("selection.metadata.execution_spec is required")
+            prompt_path = execution_spec.resolved_prompt_path(repo_root=self.repo_root)
+            if not prompt_path.exists() or not prompt_path.is_file():
+                raise ValueError(
+                    f"missing execution spec prompt: {prompt_path}"
+                )
+            return prompt_path
+
+        raise ValueError(
+            f"unsupported selection route {route!r} for issue {selection.issue_id}"
+        )
 
     def _build_loop_config(
         self,
@@ -350,51 +374,136 @@ class IssueDagNodeExecutionAdapter:
         team: str,
         prompt_path: Path,
         prompt: str,
+        route: str,
+        execution_spec: ExecutionSpec | None,
     ) -> LoopfarmConfig:
-        cli = self._role_cli()
-        model = self._role_model()
-        reasoning = self._role_reasoning()
+        if route == ROUTE_SPEC_EXECUTION and execution_spec is not None:
+            return self._build_spec_loop_config(
+                team=team,
+                prompt=prompt,
+                prompt_path=prompt_path,
+                execution_spec=execution_spec,
+            )
+        if route == ROUTE_SPEC_EXECUTION:
+            raise ValueError("execution_spec is required for route=spec_execution")
+
+        if route != ROUTE_ORCHESTRATOR_PLANNING:
+            raise ValueError(f"unsupported selection route {route!r}")
+
+        defaults = read_execution_defaults(prompt_path)
+        return self._build_orchestrator_loop_config(
+            team=team,
+            prompt=prompt,
+            prompt_path=prompt_path,
+            defaults=defaults,
+        )
+
+    def _build_orchestrator_loop_config(
+        self,
+        *,
+        team: str,
+        prompt: str,
+        prompt_path: Path,
+        defaults: RoleExecutionDefaults,
+    ) -> LoopfarmConfig:
+        loop_steps = defaults.loop_steps or ((ROLE_PHASE, 1),)
+        ordered_phases: list[str] = []
+        seen_phases: set[str] = set()
+        for phase, _repeat in loop_steps:
+            if phase not in seen_phases:
+                ordered_phases.append(phase)
+                seen_phases.add(phase)
+
+        termination_phase = defaults.termination_phase or ordered_phases[-1]
+        if termination_phase not in seen_phases:
+            raise ValueError(
+                "orchestrator.md frontmatter termination_phase must reference "
+                "a phase in loop_steps"
+            )
+
+        cli = defaults.cli or DEFAULT_ORCHESTRATOR_CLI
+        model = defaults.model or DEFAULT_ORCHESTRATOR_MODEL
+        reasoning = defaults.reasoning or DEFAULT_ORCHESTRATOR_REASONING
+
         phase_models: tuple[tuple[str, CodexPhaseModel], ...]
         if cli == "kimi":
             phase_models = ()
         else:
-            phase_models = ((ROLE_PHASE, CodexPhaseModel(model, reasoning)),)
+            phase_models = tuple(
+                (phase, CodexPhaseModel(model, reasoning))
+                for phase in ordered_phases
+            )
 
         project = (team or self.repo_root.name or "loopfarm").strip() or "loopfarm"
         return LoopfarmConfig(
             repo_root=self.repo_root,
             project=project,
             prompt=prompt,
-            loop_steps=((ROLE_PHASE, 1),),
-            termination_phase=ROLE_PHASE,
+            loop_steps=loop_steps,
+            termination_phase=termination_phase,
             phase_models=phase_models,
-            phase_cli_overrides=((ROLE_PHASE, cli),),
-            phase_prompt_overrides=((ROLE_PHASE, str(prompt_path)),),
+            phase_cli_overrides=tuple((phase, cli) for phase in ordered_phases),
+            phase_prompt_overrides=tuple(
+                (phase, str(prompt_path)) for phase in ordered_phases
+            ),
         )
 
-    @staticmethod
-    def _role_cli() -> str:
-        raw = env_value("LOOPFARM_ROLE_CLI")
-        if raw is None:
-            return DEFAULT_ROLE_CLI
-        value = raw.strip().lower()
-        return value or DEFAULT_ROLE_CLI
+    def _build_spec_loop_config(
+        self,
+        *,
+        team: str,
+        prompt: str,
+        prompt_path: Path,
+        execution_spec: ExecutionSpec,
+    ) -> LoopfarmConfig:
+        loop_steps = execution_spec.loop_step_tuples()
+        if not loop_steps:
+            raise ValueError("execution_spec.loop_steps cannot be empty")
 
-    @staticmethod
-    def _role_model() -> str:
-        raw = env_value("LOOPFARM_ROLE_MODEL")
-        if raw is None:
-            return DEFAULT_ROLE_MODEL
-        value = raw.strip()
-        return value or DEFAULT_ROLE_MODEL
+        ordered_phases: list[str] = []
+        seen_phases: set[str] = set()
+        for phase, _repeat in loop_steps:
+            if phase not in seen_phases:
+                ordered_phases.append(phase)
+                seen_phases.add(phase)
 
-    @staticmethod
-    def _role_reasoning() -> str:
-        raw = env_value("LOOPFARM_ROLE_REASONING")
-        if raw is None:
-            return DEFAULT_ROLE_REASONING
-        value = raw.strip()
-        return value or DEFAULT_ROLE_REASONING
+        phase_cli_overrides: list[tuple[str, str]] = []
+        phase_prompt_overrides: list[tuple[str, str]] = []
+        phase_models: list[tuple[str, CodexPhaseModel]] = []
+
+        for phase in ordered_phases:
+            cli = execution_spec.cli_for_phase(phase)
+            phase_cli_overrides.append((phase, cli))
+
+            prompt_override = execution_spec.prompt_for_phase(phase)
+            if phase == "role":
+                prompt_override = str(prompt_path)
+            if prompt_override:
+                prompt_path_obj = Path(prompt_override)
+                if not prompt_path_obj.is_absolute():
+                    prompt_path_obj = self.repo_root / prompt_path_obj
+                if not prompt_path_obj.exists() or not prompt_path_obj.is_file():
+                    raise ValueError(
+                        f"missing execution spec prompt for phase {phase!r}: "
+                        f"{prompt_path_obj}"
+                    )
+                phase_prompt_overrides.append((phase, prompt_override))
+
+            if cli != "kimi":
+                model_name, reasoning = execution_spec.model_for_phase(phase)
+                phase_models.append((phase, CodexPhaseModel(model_name, reasoning)))
+
+        project = (team or self.repo_root.name or "loopfarm").strip() or "loopfarm"
+        return LoopfarmConfig(
+            repo_root=self.repo_root,
+            project=project,
+            prompt=prompt,
+            loop_steps=loop_steps,
+            termination_phase=execution_spec.termination_phase,
+            phase_models=tuple(phase_models),
+            phase_cli_overrides=tuple(phase_cli_overrides),
+            phase_prompt_overrides=tuple(phase_prompt_overrides),
+        )
 
     def _build_issue_prompt(self, issue: dict[str, Any]) -> str:
         issue_id = str(issue.get("id") or "").strip() or "unknown"
@@ -459,6 +568,7 @@ class IssueDagNodeExecutionAdapter:
             "tags": tags,
             "status": str(payload.get("status") or "").strip(),
             "outcome": outcome,
+            "execution_spec": payload.get("execution_spec"),
         }
 
     @staticmethod
@@ -467,7 +577,7 @@ class IssueDagNodeExecutionAdapter:
         issue_id: str,
         status: str,
         outcome: str | None,
-        route: str | None = None,
+        route: str,
     ) -> str | None:
         if status not in _TERMINAL_STATUSES:
             return (
@@ -481,22 +591,38 @@ class IssueDagNodeExecutionAdapter:
                 f"({allowed})"
             )
 
-        if route == "planning" and outcome != "expanded":
+        if route == ROUTE_ORCHESTRATOR_PLANNING and outcome != "expanded":
             return (
-                f"issue {issue_id} routed via planning must end with "
+                f"issue {issue_id} routed via {ROUTE_ORCHESTRATOR_PLANNING} must end with "
                 "outcome=expanded"
             )
-        if route == "execution" and outcome == "expanded":
+        if route == ROUTE_SPEC_EXECUTION and outcome == "expanded":
             return (
-                f"issue {issue_id} routed via execution must not end with "
+                f"issue {issue_id} routed via {ROUTE_SPEC_EXECUTION} must not end with "
                 "outcome=expanded"
             )
         return None
 
     @staticmethod
-    def _selection_route(selection: NodeExecutionSelection) -> str | None:
+    def _require_selection_route(selection: NodeExecutionSelection) -> str:
         route = str(selection.metadata.get("route") or "").strip()
-        return route or None
+        if route not in {ROUTE_SPEC_EXECUTION, ROUTE_ORCHESTRATOR_PLANNING}:
+            raise ValueError(
+                "selection.metadata.route must be one of "
+                f"{ROUTE_SPEC_EXECUTION!r}, {ROUTE_ORCHESTRATOR_PLANNING!r}"
+            )
+        return route
+
+    @staticmethod
+    def _selection_execution_spec(
+        selection: NodeExecutionSelection,
+    ) -> ExecutionSpec | None:
+        raw_spec = selection.metadata.get("execution_spec")
+        if raw_spec is None and isinstance(selection.issue, dict):
+            raw_spec = selection.issue.get("execution_spec")
+        if raw_spec is None:
+            return None
+        return parse_execution_spec(raw_spec)
 
     def _resolve_root_id(
         self,

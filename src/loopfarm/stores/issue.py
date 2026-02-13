@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..execution_spec import normalize_execution_spec_payload
 from .state import now_ms, resolve_state_dir
 
 
@@ -63,6 +65,7 @@ CREATE TABLE IF NOT EXISTS issues (
     body TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL,
     outcome TEXT,
+    execution_spec TEXT,
     priority INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -189,6 +192,31 @@ def _team_tags_from_tags(tags: list[str]) -> list[str]:
     ]
 
 
+def _serialize_execution_spec(value: object | None) -> str | None:
+    if value is None:
+        return None
+    normalized = normalize_execution_spec_payload(value)
+    return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+
+
+def _deserialize_execution_spec(value: object) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        raw_text = value.decode("utf-8", errors="replace")
+    else:
+        raw_text = str(value)
+    text = raw_text.strip()
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"stored execution_spec is invalid JSON: {exc}") from exc
+    normalized = normalize_execution_spec_payload(payload)
+    return dict(normalized)
+
+
 @dataclass
 class IssueStore:
     root: Path
@@ -229,6 +257,8 @@ class IssueStore:
         }
         if "outcome" not in issue_columns:
             conn.execute("ALTER TABLE issues ADD COLUMN outcome TEXT")
+        if "execution_spec" not in issue_columns:
+            conn.execute("ALTER TABLE issues ADD COLUMN execution_spec TEXT")
 
     def create(
         self,
@@ -238,6 +268,7 @@ class IssueStore:
         status: str = "open",
         priority: int = 3,
         tags: list[str] | None = None,
+        execution_spec: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         issue_title = title.strip()
         if not issue_title:
@@ -245,6 +276,7 @@ class IssueStore:
 
         issue_status = _normalize_status(status)
         issue_priority = _normalize_priority(priority)
+        spec_json = _serialize_execution_spec(execution_spec)
         now = now_ms()
         issue_id = _new_issue_id()
 
@@ -252,9 +284,9 @@ class IssueStore:
             conn.execute(
                 """
                 INSERT INTO issues(
-                    id, title, body, status, outcome, priority, created_at, updated_at
+                    id, title, body, status, outcome, execution_spec, priority, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     issue_id,
@@ -262,6 +294,7 @@ class IssueStore:
                     body,
                     issue_status,
                     None,
+                    spec_json,
                     issue_priority,
                     now,
                     now,
@@ -287,7 +320,7 @@ class IssueStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, title, body, status, outcome, priority, created_at, updated_at
+                SELECT id, title, body, status, outcome, execution_spec, priority, created_at, updated_at
                 FROM issues
                 WHERE id=?
                 """,
@@ -302,6 +335,7 @@ class IssueStore:
             "body": str(row["body"]),
             "status": str(row["status"]),
             "outcome": (str(row["outcome"]) if row["outcome"] is not None else None),
+            "execution_spec": _deserialize_execution_spec(row["execution_spec"]),
             "priority": int(row["priority"]),
             "created_at": int(row["created_at"]),
             "updated_at": int(row["updated_at"]),
@@ -346,6 +380,7 @@ class IssueStore:
                 i.body,
                 i.status,
                 i.outcome,
+                i.execution_spec,
                 i.priority,
                 i.created_at,
                 i.updated_at
@@ -383,6 +418,7 @@ class IssueStore:
                 "outcome": (
                     str(row["outcome"]) if row["outcome"] is not None else None
                 ),
+                "execution_spec": _deserialize_execution_spec(row["execution_spec"]),
                 "priority": int(row["priority"]),
                 "created_at": int(row["created_at"]),
                 "updated_at": int(row["updated_at"]),
@@ -401,6 +437,8 @@ class IssueStore:
         priority: int | None = None,
         outcome: str | None = None,
         outcome_provided: bool = False,
+        execution_spec: dict[str, Any] | None = None,
+        execution_spec_provided: bool = False,
     ) -> dict[str, Any]:
         issue_key = issue_id.strip()
         if not issue_key:
@@ -453,6 +491,10 @@ class IssueStore:
             set_parts.append("priority = ?")
             params.append(_normalize_priority(priority))
 
+        if execution_spec_provided:
+            set_parts.append("execution_spec = ?")
+            params.append(_serialize_execution_spec(execution_spec))
+
         if not set_parts:
             return current_issue
 
@@ -484,6 +526,24 @@ class IssueStore:
             status=status,
             outcome=outcome,
             outcome_provided=outcome_provided,
+        )
+
+    def set_execution_spec(
+        self,
+        issue_id: str,
+        execution_spec: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.update(
+            issue_id,
+            execution_spec=execution_spec,
+            execution_spec_provided=True,
+        )
+
+    def clear_execution_spec(self, issue_id: str) -> dict[str, Any]:
+        return self.update(
+            issue_id,
+            execution_spec=None,
+            execution_spec_provided=True,
         )
 
     def set_priority(self, issue_id: str, priority: int) -> dict[str, Any]:
@@ -2005,6 +2065,7 @@ class IssueStore:
                 i.body,
                 i.status,
                 i.outcome,
+                i.execution_spec,
                 i.priority,
                 i.created_at,
                 i.updated_at
@@ -2026,6 +2087,7 @@ class IssueStore:
                     i.body,
                     i.status,
                     i.outcome,
+                    i.execution_spec,
                     i.priority,
                     i.created_at,
                     i.updated_at
@@ -2091,6 +2153,7 @@ class IssueStore:
                 "outcome": (
                     str(row["outcome"]) if row["outcome"] is not None else None
                 ),
+                "execution_spec": _deserialize_execution_spec(row["execution_spec"]),
                 "priority": int(row["priority"]),
                 "created_at": int(row["created_at"]),
                 "updated_at": int(row["updated_at"]),
@@ -2149,6 +2212,7 @@ class IssueStore:
                 "outcome": (
                     str(row["outcome"]) if row["outcome"] is not None else None
                 ),
+                "execution_spec": _deserialize_execution_spec(row["execution_spec"]),
                 "priority": int(row["priority"]),
                 "created_at": int(row["created_at"]),
                 "updated_at": int(row["updated_at"]),

@@ -11,7 +11,7 @@ repeat up to max_steps:
   if termination.is_final: stop(root_final)
   selection = select_next_execution(root, tags, resume_mode)
   if selection is None: stop(no_executable_leaf)
-  execute_selection(selection)   # planning (.loopfarm/orchestrator.md) OR execution (.loopfarm/roles/*.md)
+  execute_selection(selection)   # orchestrator_planning or spec_execution
   maintenance(selection)         # reconcile control-flow ancestors (or full subtree)
   validate(root)
 stop(max_steps_exhausted)
@@ -37,8 +37,8 @@ After a selection executes, the selected issue must end in a terminal state:
 
 Route-specific constraints:
 
-- `route=planning` must end with `outcome=expanded`
-- `route=execution` must not end with `outcome=expanded`
+- `route=orchestrator_planning` must end with `outcome=expanded`
+- `route=spec_execution` must not end with `outcome=expanded`
 
 ## Stop Reasons
 

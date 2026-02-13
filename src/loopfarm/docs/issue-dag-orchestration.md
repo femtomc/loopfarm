@@ -43,7 +43,6 @@ Topic conventions:
 Required tags (minimal set used by the orchestrator):
 
 - `node:agent`: marks executable/plannable nodes.
-- `granularity:atomic`: marks leaves that should execute via a role (not expand).
 - `node:control` plus exactly one `cf:*` tag: marks control-flow aggregators.
 
 Required edges (minimal set used for DAG semantics):
@@ -56,7 +55,8 @@ Required outcomes (terminal result taxonomy):
 - `success`, `failure`, `expanded`, `skipped`
 
 Everything else is optional labeling/routing sugar (for example `team:*`,
-`role:*`, and `related` edges).
+`role:*`, and `related` edges). Execution routing is determined by the presence
+of `execution_spec` on the selected issue.
 
 ### CLI Contract (Stable vs Internal)
 
@@ -91,14 +91,13 @@ Internal/advanced commands (debugging/ops; subject to change):
 
 ### Routing Tags
 
-- `role:<name>`: optional role override for atomic execution.
-- `granularity:atomic`: explicit marker that a leaf is executable without further decomposition.
+- `execution_spec`: per-issue JSON spec that drives execution mode.
 - `team:<name>`: optional label only (kept in emitted event metadata for traceability).
+- `role:<name>`: optional metadata tag for operator traceability.
 
 Recommended conventions:
 
-- Use at most one `role:*` tag per node.
-- Omit `role:*` on most nodes; atomic routing will default to `worker` when present.
+- Prefer `execution_spec` over tag-driven routing.
 - Use `team:*` only as an optional reporting label.
 
 ## Edge Semantics
@@ -125,15 +124,18 @@ Rules:
 
 The orchestrator reads two prompt surfaces only:
 
-1. `.loopfarm/orchestrator.md`: used when a selected leaf is non-atomic and must be decomposed.
-2. `.loopfarm/roles/<role>.md`: used when a selected leaf is atomic and routed to execution.
+1. `.loopfarm/orchestrator.md`: used when a selected leaf has no `execution_spec`.
+2. Prompt paths declared by `execution_spec` (typically `.loopfarm/roles/<role>.md`).
 
-Role resolution for atomic leaves:
+Execution settings are sourced from markdown frontmatter in those prompt files.
+No orchestration-time environment variables are used for route CLI/model/reasoning.
 
-- explicit `role:<name>` tag if present
-- otherwise `worker` if `.loopfarm/roles/worker.md` exists
-- otherwise the single available role doc if exactly one exists
-- otherwise fail fast and require explicit `role:<name>`
+Execution route resolution:
+
+- if issue has valid `execution_spec` → `route=spec_execution`
+- otherwise → `route=orchestrator_planning`
+- `loopfarm roles assign ... --lead <role>` materializes `execution_spec` from
+  role markdown frontmatter defaults
 
 ## Orchestrator Decision Procedure (MVP)
 
@@ -145,13 +147,13 @@ def orchestrate(root_id):
             validate_subtree(root_id)
             break
 
-        if not leaf.has_tag("granularity:atomic"):
+        if not leaf.has_execution_spec():
             run_prompt(".loopfarm/orchestrator.md", issue=leaf)
             close_issue(leaf, outcome="expanded")
             continue
 
-        role = resolve_role_from_tags_and_role_docs(leaf)
-        run_prompt(f".loopfarm/roles/{role}.md", issue=leaf)
+        spec = parse_execution_spec(leaf.execution_spec)
+        run_spec(spec, issue=leaf)
         reconcile_ancestors(leaf)
 ```
 
@@ -243,8 +245,7 @@ Optional provenance fields:
 ## MVP Non-Goals
 
 - No concurrent execution scheduler.
-- No automatic role synthesis beyond explicit role docs.
-- No program/team config routing layer.
+- No automatic role synthesis beyond explicit role docs/frontmatter.
 
 ## See Also
 

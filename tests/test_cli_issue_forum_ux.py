@@ -26,6 +26,21 @@ def _bootstrap_orchestration_prompts(tmp_path: Path, *, roles: tuple[str, ...]) 
         (roles_dir / f"{role}.md").write_text(f"# {role}\n", encoding="utf-8")
 
 
+def _execution_spec(
+    *,
+    role: str,
+    team: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "version": 1,
+        "role": role,
+        "prompt_path": f".loopfarm/roles/{role}.md",
+    }
+    if team:
+        payload["team"] = team
+    return payload
+
+
 def test_issue_list_empty_prints_message_and_has_no_side_effects(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -189,7 +204,8 @@ def test_issue_orchestrate_json_claims_leaf_and_emits_node_execute(
     root = issue.create("Root", tags=["node:agent", "team:platform"])
     leaf = issue.create(
         "Atomic leaf",
-        tags=["node:agent", "team:platform", "granularity:atomic"],
+        tags=["node:agent", "team:platform"],
+        execution_spec=_execution_spec(role="worker", team="platform"),
     )
     issue.add_dep(root["id"], "parent", leaf["id"])
     _bootstrap_orchestration_prompts(tmp_path, roles=("worker",))
@@ -204,7 +220,7 @@ def test_issue_orchestrate_json_claims_leaf_and_emits_node_execute(
     assert payload["selection"]["id"] == leaf["id"]
     assert payload["selection"]["team"] == "platform"
     assert payload["selection"]["role"] == "worker"
-    assert payload["selection"]["program"] == "role:worker"
+    assert payload["selection"]["program"] == "spec:worker"
     assert payload["selection"]["mode"] == "claim"
     assert payload["selection"]["issue"]["status"] == "in_progress"
 
@@ -216,7 +232,7 @@ def test_issue_orchestrate_json_claims_leaf_and_emits_node_execute(
         entry.get("kind") == "node.execute"
         and entry.get("id") == leaf["id"]
         and entry.get("role") == "worker"
-        and entry.get("program") == "role:worker"
+        and entry.get("program") == "spec:worker"
         for entry in run_payloads
     )
 
@@ -230,7 +246,8 @@ def test_issue_orchestrate_json_includes_team_assembly_loop_details(
     root = issue.create("Root", tags=["node:agent", "team:platform"])
     leaf = issue.create(
         "Atomic leaf",
-        tags=["node:agent", "team:platform", "granularity:atomic"],
+        tags=["node:agent", "team:platform"],
+        execution_spec=_execution_spec(role="worker", team="platform"),
     )
     issue.add_dep(root["id"], "parent", leaf["id"])
     _bootstrap_orchestration_prompts(tmp_path, roles=("worker", "reviewer"))
@@ -243,7 +260,7 @@ def test_issue_orchestrate_json_includes_team_assembly_loop_details(
     team_assembly = metadata["team_assembly"]
     selected = team_assembly["selected"]
     assert selected["role"] == "worker"
-    assert selected["program"] == "role:worker"
+    assert selected["program"] == "spec:worker"
     assert selected["role_doc"] == ".loopfarm/roles/worker.md"
     roles = {row["role"] for row in team_assembly["roles"]}
     assert roles == {"worker", "reviewer"}
@@ -293,7 +310,7 @@ def test_issue_orchestrate_routes_non_atomic_leaf_to_orchestrator_role(
     assert payload["selection"]["metadata"]["role_source"] == "orchestrator.prompt"
 
 
-def test_issue_orchestrate_fails_fast_when_no_role_docs_exist(
+def test_issue_orchestrate_fails_fast_without_orchestrator_prompt_when_no_spec(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -312,10 +329,10 @@ def test_issue_orchestrate_fails_fast_when_no_role_docs_exist(
 
     assert raised.value.code == 1
     stderr = capsys.readouterr().err
-    assert "no role docs available" in stderr
+    assert "missing orchestrator prompt" in stderr
 
 
-def test_issue_orchestrate_run_fails_fast_when_no_role_docs_exist(
+def test_issue_orchestrate_run_fails_fast_without_orchestrator_prompt_when_no_spec(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -334,7 +351,7 @@ def test_issue_orchestrate_run_fails_fast_when_no_role_docs_exist(
 
     assert raised.value.code == 1
     stderr = capsys.readouterr().err
-    assert "no role docs available" in stderr
+    assert "missing orchestrator prompt" in stderr
 
 
 def test_issue_orchestrate_json_recursive_max_passes_returns_passes(

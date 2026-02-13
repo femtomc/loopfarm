@@ -93,7 +93,13 @@ def _write_orchestrator_prompt(repo_root: Path) -> None:
     path.write_text("# orchestrator\n", encoding="utf-8")
 
 
-def _claim(issue_id: str, *, tags: list[str], claimed_at: int = 100) -> dict[str, Any]:
+def _claim(
+    issue_id: str,
+    *,
+    tags: list[str],
+    claimed_at: int = 100,
+    execution_spec: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "id": issue_id,
         "claimed": True,
@@ -104,6 +110,7 @@ def _claim(issue_id: str, *, tags: list[str], claimed_at: int = 100) -> dict[str
             "priority": 1,
             "updated_at": claimed_at,
             "tags": tags,
+            "execution_spec": execution_spec,
         },
     }
 
@@ -139,30 +146,40 @@ def test_non_atomic_routes_to_orchestrator_prompt(tmp_path: Path) -> None:
     assert selection.role == "orchestrator"
     assert selection.program == "orchestrator"
     assert selection.team == "platform"
-    assert selection.metadata["route"] == "planning"
+    assert selection.metadata["route"] == "orchestrator_planning"
     assert selection.metadata["team_assembly"]["selected"]["role_doc"] == ".loopfarm/orchestrator.md"
 
     execute_payload = _execute_payload(forum)
-    assert execute_payload["route"] == "planning"
+    assert execute_payload["route"] == "orchestrator_planning"
     assert validate_issue_dag_event(execute_payload) == []
 
 
-def test_atomic_defaults_to_worker_role(tmp_path: Path) -> None:
+def test_execution_spec_routes_to_spec_execution_role(tmp_path: Path) -> None:
     _write_orchestrator_prompt(tmp_path)
     _write_role(tmp_path, "worker")
     _write_role(tmp_path, "reviewer")
+    execution_spec = {
+        "version": 1,
+        "role": "worker",
+        "prompt_path": ".loopfarm/roles/worker.md",
+    }
     issue = FakeIssueClient(
         ready_rows=[
             {
                 "id": "loopfarm-work",
                 "priority": 1,
                 "updated_at": 50,
-                "tags": ["node:agent", "granularity:atomic"],
+                "tags": ["node:agent"],
+                "execution_spec": execution_spec,
             }
         ],
         claim_plan={
             "loopfarm-work": [
-                _claim("loopfarm-work", tags=["node:agent", "granularity:atomic"])
+                _claim(
+                    "loopfarm-work",
+                    tags=["node:agent"],
+                    execution_spec=execution_spec,
+                )
             ]
         },
     )
@@ -173,13 +190,13 @@ def test_atomic_defaults_to_worker_role(tmp_path: Path) -> None:
 
     assert selection is not None
     assert selection.role == "worker"
-    assert selection.program == "role:worker"
+    assert selection.program == "spec:worker"
     assert selection.team == "dynamic"
-    assert selection.metadata["route"] == "execution"
-    assert selection.metadata["role_source"] == "role.default.worker"
+    assert selection.metadata["route"] == "spec_execution"
+    assert selection.metadata["role_source"] == "execution_spec"
 
 
-def test_atomic_requires_explicit_role_when_multiple_non_worker_docs(tmp_path: Path) -> None:
+def test_invalid_execution_spec_fails_fast(tmp_path: Path) -> None:
     _write_orchestrator_prompt(tmp_path)
     _write_role(tmp_path, "reviewer")
     _write_role(tmp_path, "qa")
@@ -189,40 +206,52 @@ def test_atomic_requires_explicit_role_when_multiple_non_worker_docs(tmp_path: P
                 "id": "loopfarm-work",
                 "priority": 1,
                 "updated_at": 50,
-                "tags": ["node:agent", "granularity:atomic"],
+                "tags": ["node:agent"],
+                "execution_spec": {"role": ""},
             }
         ],
         claim_plan={
             "loopfarm-work": [
-                _claim("loopfarm-work", tags=["node:agent", "granularity:atomic"])
+                _claim(
+                    "loopfarm-work",
+                    tags=["node:agent"],
+                    execution_spec={"role": ""},
+                )
             ]
         },
     )
     forum = FakeForumClient()
     orchestrator = IssueDagOrchestrator(repo_root=tmp_path, issue=issue, forum=forum)
 
-    with pytest.raises(ValueError, match="set role:<name>"):
+    with pytest.raises(ValueError, match="invalid execution_spec"):
         orchestrator.select_next_execution(root_id="loopfarm-root")
 
 
-def test_atomic_honors_explicit_role_tag(tmp_path: Path) -> None:
+def test_execution_spec_honors_explicit_role(tmp_path: Path) -> None:
     _write_orchestrator_prompt(tmp_path)
     _write_role(tmp_path, "worker")
     _write_role(tmp_path, "reviewer")
+    execution_spec = {
+        "version": 1,
+        "role": "reviewer",
+        "prompt_path": ".loopfarm/roles/reviewer.md",
+    }
     issue = FakeIssueClient(
         ready_rows=[
             {
                 "id": "loopfarm-review",
                 "priority": 1,
                 "updated_at": 50,
-                "tags": ["node:agent", "granularity:atomic", "role:reviewer"],
+                "tags": ["node:agent", "role:reviewer"],
+                "execution_spec": execution_spec,
             }
         ],
         claim_plan={
             "loopfarm-review": [
                 _claim(
                     "loopfarm-review",
-                    tags=["node:agent", "granularity:atomic", "role:reviewer"],
+                    tags=["node:agent", "role:reviewer"],
+                    execution_spec=execution_spec,
                 )
             ]
         },
@@ -234,5 +263,5 @@ def test_atomic_honors_explicit_role_tag(tmp_path: Path) -> None:
 
     assert selection is not None
     assert selection.role == "reviewer"
-    assert selection.program == "role:reviewer"
-    assert selection.metadata["role_source"] == "tag:role:reviewer"
+    assert selection.program == "spec:reviewer"
+    assert selection.metadata["role_source"] == "execution_spec"

@@ -58,9 +58,9 @@ def test_docs_show_plain_outputs_markdown(
 
     out = capsys.readouterr().out
     assert "# Issue-DAG Step Routing Grammar" in out
-    assert "granularity:atomic" in out
+    assert "execution_spec" in out
     assert ".loopfarm/orchestrator.md" in out
-    assert "tags: [node:agent, granularity:atomic]" in out
+    assert "route: spec_execution" in out
 
 
 def test_docs_show_rich_renders_panel_and_markdown(
@@ -108,9 +108,9 @@ def test_docs_show_issue_dag_topic_in_plain_and_rich(
     assert "# Issue-DAG Orchestration" in plain
     assert "cf:sequence" in plain
     assert "role:<name>" in plain
-    assert "granularity:atomic" in plain
+    assert "execution_spec" in plain
     assert ".loopfarm/orchestrator.md" in plain
-    assert ".loopfarm/roles/*.md" in plain
+    assert ".loopfarm/roles/<role>.md" in plain
     assert "def orchestrate(root_id):" in plain
     assert "node.memory" in plain
     assert "issue_refs" in plain

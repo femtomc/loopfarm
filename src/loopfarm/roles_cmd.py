@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .execution_spec import normalize_execution_spec_payload
 from .forum import Forum
 from .issue import Issue
 from .runtime.issue_dag_execution import DEFAULT_RUN_TOPIC
@@ -123,7 +124,7 @@ def _print_help(*, output_mode: str) -> None:
                     ("show <role>", "show one role markdown document"),
                     (
                         "assign",
-                        "write team:<name> + role:<lead> tags and emit node.team forum events",
+                        "write team metadata, emit node.team events, and materialize execution_spec",
                     ),
                 ),
             ),
@@ -221,6 +222,7 @@ def _build_assignment_payload(
     roles: list[str],
     catalog: RoleCatalog,
     repo_root: Path,
+    execution_spec: dict[str, object],
 ) -> dict[str, object]:
     role_docs: list[dict[str, str]] = []
     for role in roles:
@@ -239,8 +241,44 @@ def _build_assignment_payload(
         "lead_role": lead,
         "roles": roles,
         "role_docs": role_docs,
+        "execution_spec": execution_spec,
         "source": "roles_catalog",
     }
+
+
+def _build_execution_spec_from_role(
+    *,
+    role: str,
+    team: str,
+    catalog: RoleCatalog,
+    repo_root: Path,
+) -> dict[str, object]:
+    role_doc = catalog.require(role=role)
+    defaults = role_doc.execution_defaults
+    loop_steps = [
+        {"phase": phase, "repeat": repeat}
+        for phase, repeat in defaults.loop_steps
+    ]
+    if not loop_steps:
+        loop_steps = [{"phase": "role", "repeat": 1}]
+    termination_phase = defaults.termination_phase or str(loop_steps[-1]["phase"])
+    payload: dict[str, object] = {
+        "version": 1,
+        "role": role,
+        "team": team,
+        "prompt_path": _format_path(role_doc.source_path, repo_root),
+        "loop_steps": loop_steps,
+        "termination_phase": termination_phase,
+    }
+    if defaults.cli:
+        payload["default_cli"] = defaults.cli
+    if defaults.model:
+        payload["default_model"] = defaults.model
+    if defaults.reasoning:
+        payload["default_reasoning"] = defaults.reasoning
+    if defaults.control_flow_mode:
+        payload["control_flow"] = {"mode": defaults.control_flow_mode}
+    return normalize_execution_spec_payload(payload)
 
 
 def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str, object]:
@@ -288,6 +326,14 @@ def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str
     if desired_role_tag not in tags:
         issue.add_tag(issue_id, desired_role_tag)
 
+    execution_spec = _build_execution_spec_from_role(
+        role=lead,
+        team=team,
+        catalog=catalog,
+        repo_root=repo_root,
+    )
+    issue.set_execution_spec(issue_id, execution_spec)
+
     payload = _build_assignment_payload(
         issue_id=issue_id,
         team=team,
@@ -295,6 +341,7 @@ def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str
         roles=ordered_roles,
         catalog=catalog,
         repo_root=repo_root,
+        execution_spec=execution_spec,
     )
 
     forum = Forum.from_workdir(repo_root)
@@ -310,6 +357,7 @@ def _assign_issue_team(args: argparse.Namespace, *, repo_root: Path) -> dict[str
             "team": desired_team_tag,
             "role": desired_role_tag,
         },
+        "execution_spec": execution_spec,
         "event": payload,
     }
     return result

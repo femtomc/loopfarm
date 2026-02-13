@@ -42,40 +42,6 @@ just ask your agent about it.
 
 Install via `uv tool install --from git+https://github.com/femtomc/loopfarm loopfarm` and then poke around the CLI or have your agent do it. It's self-explanatory. If it's not self-explanatory, it's not ready for usage, and you shouldn't use it.
 
-## Backend Selection
-
-Set `cli` in role/orchestrator frontmatter (or `execution_spec.cli`) to choose a backend:
-
-- `claude`
-- `codex`
-- `opencode`
-- `pi`
-- `gemini`
-
-`opencode` is invoked as:
-
-```bash
-opencode run --format json --dir <repo-root> --model <model> --variant <reasoning> "<prompt>"
-```
-
-Streaming events are parsed from OpenCode JSON output (`tool_use`, `text`, `reasoning`, `error`), and non-zero process exit codes propagate through normal DAG failure handling. Use `loopfarm replay <issue-id> --backend opencode` to replay OpenCode logs.
-
-`pi` is invoked as:
-
-```bash
-pi --mode json --no-session --model <model> --thinking <reasoning> "<prompt>"
-```
-
-Streaming events are parsed from pi JSON output (`tool_execution_*`, `message_update`, `message_end`, retry/compaction events). If pi reports an assistant `error`/`aborted` result in-stream, loopfarm maps that to a non-zero backend exit so DAG failure handling is consistent. Use `loopfarm replay <issue-id> --backend pi` to replay pi logs.
-
-`gemini` is invoked as:
-
-```bash
-gemini --output-format stream-json --model <model> --yolo --prompt "<prompt>"
-```
-
-Streaming events are parsed from Gemini stream-json output (`init`, `message`, `tool_use`, `tool_result`, `error`, `result`). If Gemini emits a final `result` with non-`success` status while returning process exit `0`, loopfarm maps that to a non-zero backend exit so DAG failure handling stays consistent. Use `loopfarm replay <issue-id> --backend gemini` to replay Gemini logs.
-
 ## Still around?
 
 This package is based on a few simple premises:

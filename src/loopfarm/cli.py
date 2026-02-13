@@ -68,9 +68,9 @@ def cmd_init(console: Console) -> int:
             "reasoning: high\n"
             "---\n\n"
             "{{PROMPT}}\n\n"
-            "{{DYNAMIC_CONTEXT}}\n\n"
             "You are an orchestrator agent. Execute the task described above.\n"
-            "When done, close the issue using the loopfarm issue store.\n"
+            "Use the forum store for dynamic context between execution steps.\n"
+            "When done, close the issue.\n"
         )
 
     (lf / "logs").mkdir(exist_ok=True)

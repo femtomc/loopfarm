@@ -99,7 +99,7 @@ class DagRunner:
 
             # 5. Render prompt
             if prompt_path and Path(prompt_path).exists():
-                rendered = render(prompt_path, issue, self.repo_root)
+                rendered = render(prompt_path, issue)
             else:
                 # No prompt template — use issue title+body directly
                 rendered = issue["title"]

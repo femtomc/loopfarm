@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -29,12 +28,7 @@ def read_prompt_meta(path: str | Path) -> dict:
     return meta
 
 
-def render(
-    path: str | Path,
-    issue: dict,
-    repo_root: Path | None = None,
-    context: dict | None = None,
-) -> str:
+def render(path: str | Path, issue: dict) -> str:
     """Render a prompt template with issue data substituted."""
     text = Path(path).read_text()
     _, body = _split_frontmatter(text)
@@ -44,8 +38,4 @@ def render(
         prompt_text += "\n\n" + issue["body"]
 
     body = body.replace("{{PROMPT}}", prompt_text)
-
-    ctx_str = json.dumps(context, indent=2) if context else ""
-    body = body.replace("{{DYNAMIC_CONTEXT}}", ctx_str)
-
     return body

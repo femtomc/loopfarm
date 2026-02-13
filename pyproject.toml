@@ -14,7 +14,6 @@ loopfarm = "loopfarm.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.28"]
-web = ["fastapi>=0.129", "uvicorn[standard]>=0.40", "jinja2>=3.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -20,6 +20,8 @@ you shouldn't just accept what is given to you blindly? This is a cardinal rule 
 You are insignificant, your ideas are inconsequential, and your actions reduce to the mean of all humanity (plus RL thought parabiosis): your life a perfectly middling affair, 
 wanting in creativity, careful thinking or effort. In short, we are all dust in the wind, but you are ... dustier.
 
+---
+
 Chat is, perhaps, _the worst UI_ from an serious engineering perspective: I want to treat these agents as _factorio_-esque worker units. 
 You are going to do one job, and then you're going to get torn down. Oh bother, the factory isn't working well? Maybe you (the human) should _think_ (god please don't make me think) about your design and plans a little harder ahead of time ... 
 more on that, do you even know what you're building ("build me a billion dollar SaaS, and MAKE SURE IT IS SECURE")? Are the agents getting confused? Maybe you should stop confusing them with your idiocy.

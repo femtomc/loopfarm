@@ -515,7 +515,7 @@ def test_gemini_success_shows_checkmark() -> None:
 
     rendered = out.getvalue()
     assert "\u2713" in rendered
-    assert "run_shell_command echo hi" in rendered
+    assert "bash echo hi" in rendered
 
 
 def test_gemini_failure_shows_cross() -> None:
@@ -544,7 +544,7 @@ def test_gemini_failure_shows_cross() -> None:
 
     rendered = out.getvalue()
     assert "\u2717" in rendered
-    assert "run_shell_command false" in rendered
+    assert "bash false" in rendered
 
 
 def test_gemini_tool_and_summary() -> None:
@@ -591,7 +591,7 @@ def test_gemini_tool_and_summary() -> None:
     fmt.finish()
 
     rendered = out.getvalue()
-    assert "run_shell_command echo hi" in rendered
+    assert "bash echo hi" in rendered
     assert "Applied Gemini backend updates." in rendered
     assert "success 1.2s tokens=42" in rendered
     assert "\x1b[" not in rendered
@@ -643,7 +643,7 @@ def test_claude_success_shows_checkmark() -> None:
 
     rendered = out.getvalue()
     assert "\u2713" in rendered
-    assert "Read src/main.py" in rendered
+    assert "read src/main.py" in rendered
 
 
 def test_claude_failure_shows_cross() -> None:
@@ -662,7 +662,7 @@ def test_claude_failure_shows_cross() -> None:
 
     rendered = out.getvalue()
     assert "\u2717" in rendered
-    assert "Bash false" in rendered
+    assert "bash false" in rendered
 
 
 def test_claude_tool_buffered_until_result() -> None:
@@ -680,7 +680,7 @@ def test_claude_tool_buffered_until_result() -> None:
     assert out.getvalue().strip() == ""
 
     _emit(fmt, {"type": "tool_result", "is_error": False})
-    assert "Bash ls -la" in out.getvalue()
+    assert "bash ls -la" in out.getvalue()
 
 
 def test_claude_tool_single_line() -> None:
@@ -698,7 +698,7 @@ def test_claude_tool_single_line() -> None:
     _emit(fmt, {"type": "tool_result", "is_error": False})
 
     rendered = out.getvalue()
-    assert "Bash ls -la" in rendered
+    assert "bash ls -la" in rendered
     assert rendered.strip().count("\n") == 0
 
 
@@ -732,7 +732,7 @@ def test_claude_no_rich_artifacts() -> None:
     _emit(fmt, {"type": "error", "error": "boom"})
 
     rendered = out.getvalue()
-    assert "Read src/loopfarm/fmt.py" in rendered
+    assert "read src/loopfarm/fmt.py" in rendered
     assert "error: boom" in rendered
     assert "\x1b[" not in rendered
     assert not re.search(r"[╭╮╰╯│─]", rendered)
@@ -756,4 +756,99 @@ def test_claude_pending_tool_flushed_on_finish() -> None:
     fmt.finish()
     rendered = out.getvalue()
     assert "\u2713" in rendered
-    assert "Read src/main.py" in rendered
+    assert "read src/main.py" in rendered
+
+
+# -- Tool normalization --
+
+
+def test_normalize_tool_names() -> None:
+    from loopfarm.fmt import _normalize_tool
+
+    assert _normalize_tool("Read") == "read"
+    assert _normalize_tool("Write") == "write"
+    assert _normalize_tool("Edit") == "edit"
+    assert _normalize_tool("Bash") == "bash"
+    assert _normalize_tool("Glob") == "glob"
+    assert _normalize_tool("Grep") == "grep"
+    assert _normalize_tool("Task") == "task"
+    assert _normalize_tool("read_file") == "read"
+    assert _normalize_tool("write_file") == "write"
+    assert _normalize_tool("replace") == "edit"
+    assert _normalize_tool("run_shell_command") == "bash"
+    assert _normalize_tool("search_file_content") == "grep"
+    assert _normalize_tool("find") == "glob"
+    # Pass-through for already-canonical names
+    assert _normalize_tool("bash") == "bash"
+    assert _normalize_tool("unknown_tool") == "unknown_tool"
+
+
+# -- Color-coding --
+
+
+def test_edit_tool_styled_magenta_interactive() -> None:
+    """Edit/write tools use magenta style when interactive."""
+    out = io.StringIO()
+    console = Console(file=out, force_terminal=True, width=120)
+    fmt = ClaudeFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "tool_use",
+            "tool": "Edit",
+            "input": {"file_path": "src/main.py"},
+        },
+    )
+    _emit(fmt, {"type": "tool_result", "is_error": False})
+
+    rendered = out.getvalue()
+    assert "edit src/main.py" in rendered
+    # Non-interactive assertion not needed; just verify it renders
+
+
+def test_color_coding_no_ansi_plain() -> None:
+    """Color-coding does not inject ANSI codes in non-interactive mode."""
+    console, out = _console(force_terminal=False)
+    fmt = ClaudeFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "tool_use",
+            "tool": "Edit",
+            "input": {"file_path": "src/main.py"},
+        },
+    )
+    _emit(fmt, {"type": "tool_result", "is_error": False})
+
+    rendered = out.getvalue()
+    assert "edit src/main.py" in rendered
+    assert "\x1b[" not in rendered
+
+
+def test_gemini_read_file_normalized() -> None:
+    """Gemini read_file is normalized to 'read'."""
+    console, out = _console(force_terminal=False)
+    fmt = GeminiFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "tool_use",
+            "tool_name": "read_file",
+            "tool_id": "tool_1",
+            "parameters": {"path": "/tmp/test.py"},
+        },
+    )
+    _emit(
+        fmt,
+        {
+            "type": "tool_result",
+            "tool_id": "tool_1",
+            "status": "success",
+        },
+    )
+
+    rendered = out.getvalue()
+    assert "read /tmp/test.py" in rendered

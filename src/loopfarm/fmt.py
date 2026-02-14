@@ -14,6 +14,49 @@ from rich.text import Text
 _SHELL_WRAP_RE = re.compile(r"^/\S+\s+-lc\s+(.+)$", re.DOTALL)
 _CD_PREFIX_RE = re.compile(r"^cd\s+\S+\s*&&\s*")
 
+# Canonical tool name mapping per backend.
+_TOOL_ALIASES: dict[str, str] = {
+    # Claude (PascalCase → lowercase)
+    "Read": "read",
+    "Write": "write",
+    "Edit": "edit",
+    "Bash": "bash",
+    "Glob": "glob",
+    "Grep": "grep",
+    "Task": "task",
+    # Gemini
+    "read_file": "read",
+    "write_file": "write",
+    "replace": "edit",
+    "run_shell_command": "bash",
+    "search_file_content": "grep",
+    # Pi
+    "find": "glob",
+}
+
+# Category → (tools, ok_style)
+_TOOL_STYLES: dict[str, tuple[set[str], str]] = {
+    "mutate": ({"edit", "write"}, "magenta"),
+    "observe": ({"read", "glob", "grep"}, "blue"),
+    "execute": ({"bash"}, "dim"),
+    "delegate": ({"task"}, "cyan"),
+}
+
+
+def _normalize_tool(raw_name: str) -> str:
+    """Map backend-specific tool name to a canonical lowercase name."""
+    return _TOOL_ALIASES.get(raw_name, raw_name)
+
+
+def _tool_style(canonical_name: str, *, ok: bool) -> str:
+    """Return Rich style string for a tool category."""
+    if not ok:
+        return "red"
+    for _cat, (tools, style) in _TOOL_STYLES.items():
+        if canonical_name in tools:
+            return style
+    return "dim"
+
 
 def _strip_shell(cmd: str) -> str:
     """Extract the inner command from /bin/zsh -lc '...' wrappers."""
@@ -74,13 +117,43 @@ class _BaseFormatter:
         self._summary_parts: list[str] = []
         self._pending_tool: tuple[str, str] | None = None  # (name, detail)
 
+    @staticmethod
+    def _extract_detail(canonical_name: str, params: dict) -> str:
+        """Extract a human-readable detail string from tool parameters."""
+        if not isinstance(params, dict):
+            return ""
+        if canonical_name in ("read", "glob", "grep"):
+            for key in ("file_path", "filePath", "path", "pattern", "query"):
+                v = params.get(key)
+                if isinstance(v, str) and v:
+                    return v
+        elif canonical_name in ("edit", "write"):
+            for key in ("file_path", "filePath", "path"):
+                v = params.get(key)
+                if isinstance(v, str) and v:
+                    return v
+        elif canonical_name == "bash":
+            for key in ("command", "cmd"):
+                v = params.get(key)
+                if isinstance(v, str) and v:
+                    return _truncate(_strip_shell(v), 80)
+        elif canonical_name == "task":
+            v = params.get("description")
+            if isinstance(v, str) and v:
+                return v
+        else:
+            for v in params.values():
+                if isinstance(v, str) and v:
+                    return _truncate(v, 60)
+        return ""
+
     def _tool(self, name: str, detail: str = "", *, ok: bool = True) -> None:
         """Print a single-line tool invocation with success/failure indicator."""
         prefix = "\u2713" if ok else "\u2717"
         line = f"  {prefix} {name}"
         if detail:
             line += f" {detail}"
-        style = "dim" if ok else "red"
+        style = _tool_style(name, ok=ok)
         if self.interactive:
             self.console.print(Text(line, style=style))
         else:
@@ -136,10 +209,27 @@ class _BaseFormatter:
 
 
 class ClaudeFormatter(_BaseFormatter):
-    """Parses Claude stream-json events."""
+    """Parses Claude stream-json events (including partial streaming)."""
 
     def __init__(self, console: Console | None = None) -> None:
         super().__init__("claude", console)
+        self._thinking = False
+
+    def _handle_stream_event(self, event: dict) -> None:
+        """Handle stream_event (from --include-partial-messages)."""
+        inner = event.get("event", {})
+        if not isinstance(inner, dict):
+            return
+        inner_type = inner.get("type", "")
+
+        if inner_type == "content_block_start":
+            block = inner.get("content_block", {})
+            if isinstance(block, dict) and block.get("type") == "thinking":
+                if not self._thinking:
+                    self._thinking = True
+                    self._info("thinking...")
+        elif inner_type == "content_block_stop":
+            self._thinking = False
 
     def process_line(self, line: str) -> None:
         if not line.strip():
@@ -151,7 +241,11 @@ class ClaudeFormatter(_BaseFormatter):
 
         etype = event.get("type", "")
 
-        if etype == "assistant":
+        if etype == "stream_event":
+            self._handle_stream_event(event)
+
+        elif etype == "assistant":
+            self._thinking = False
             self._accumulate(event.get("message", ""))
 
         elif etype == "result":
@@ -166,23 +260,12 @@ class ClaudeFormatter(_BaseFormatter):
                 self._info(" ".join(parts))
 
         elif etype == "tool_use":
-            name = event.get("tool", event.get("name", "?"))
+            self._thinking = False
+            raw = event.get("tool", event.get("name", "?"))
+            canonical = _normalize_tool(raw)
             inp = event.get("input", {})
-            detail = ""
-            if name in ("Read", "Glob", "Grep"):
-                detail = inp.get("file_path") or inp.get("pattern") or inp.get("path", "")
-            elif name in ("Edit", "Write"):
-                detail = inp.get("file_path", "")
-            elif name == "Bash":
-                detail = _truncate(_strip_shell(inp.get("command", "")), 80)
-            elif name == "Task":
-                detail = inp.get("description", "")
-            else:
-                for v in inp.values():
-                    if isinstance(v, str) and v:
-                        detail = _truncate(v, 60)
-                        break
-            self._buffer_tool(name, detail)
+            detail = self._extract_detail(canonical, inp)
+            self._buffer_tool(canonical, detail)
 
         elif etype == "tool_result":
             is_error = event.get("is_error", False)
@@ -253,28 +336,15 @@ class OpenCodeFormatter(_BaseFormatter):
 
         if etype == "tool_use":
             part = event.get("part", {})
-            tool = part.get("tool", "?")
+            raw = part.get("tool", "?")
+            canonical = _normalize_tool(raw)
             state = part.get("state", {})
             tool_input = state.get("input", {}) if isinstance(state, dict) else {}
             if not isinstance(tool_input, dict):
                 tool_input = {}
-
-            detail = ""
-            if tool in ("read", "write", "edit"):
-                detail = tool_input.get("filePath", "")
-            elif tool in ("glob", "grep"):
-                detail = tool_input.get("pattern", "")
-            elif tool == "bash":
-                detail = _truncate(_strip_shell(tool_input.get("command", "")), 80)
-            elif tool == "task":
-                detail = tool_input.get("description", "")
-            elif isinstance(tool_input, dict):
-                for value in tool_input.values():
-                    if isinstance(value, str) and value:
-                        detail = _truncate(value, 60)
-                        break
+            detail = self._extract_detail(canonical, tool_input)
             status = state.get("status", "") if isinstance(state, dict) else ""
-            self._tool(tool, detail, ok=(status != "error"))
+            self._tool(canonical, detail, ok=(status != "error"))
 
         elif etype == "text":
             part = event.get("part", {})
@@ -308,33 +378,6 @@ class GeminiFormatter(_BaseFormatter):
     def __init__(self, console: Console | None = None) -> None:
         super().__init__("gemini", console)
 
-    def _tool_detail(self, tool_name: str, params: object) -> str:
-        if not isinstance(params, dict):
-            return ""
-
-        if tool_name in ("read_file", "write_file", "replace"):
-            for key in ("path", "file_path"):
-                value = params.get(key)
-                if isinstance(value, str) and value:
-                    return value
-
-        if tool_name in ("glob", "grep", "search_file_content"):
-            for key in ("pattern", "path", "query"):
-                value = params.get(key)
-                if isinstance(value, str) and value:
-                    return value
-
-        if tool_name in ("run_shell_command", "bash"):
-            for key in ("command", "cmd"):
-                command = params.get(key)
-                if isinstance(command, str) and command:
-                    return _truncate(_strip_shell(command), 80)
-
-        for value in params.values():
-            if isinstance(value, str) and value:
-                return _truncate(value, 60)
-        return ""
-
     def process_line(self, line: str) -> None:
         if not line.strip():
             return
@@ -346,11 +389,12 @@ class GeminiFormatter(_BaseFormatter):
         etype = event.get("type", "")
 
         if etype == "tool_use":
-            tool_name = event.get("tool_name", "?")
-            if not isinstance(tool_name, str):
-                tool_name = "?"
-            detail = self._tool_detail(tool_name, event.get("parameters", {}))
-            self._buffer_tool(tool_name, detail)
+            raw = event.get("tool_name", "?")
+            if not isinstance(raw, str):
+                raw = "?"
+            canonical = _normalize_tool(raw)
+            detail = self._extract_detail(canonical, event.get("parameters", {}))
+            self._buffer_tool(canonical, detail)
 
         elif etype == "tool_result":
             status = event.get("status")
@@ -399,32 +443,6 @@ class PiFormatter(_BaseFormatter):
     def __init__(self, console: Console | None = None) -> None:
         super().__init__("pi", console)
 
-    def _tool_detail(self, tool_name: str, args: object) -> str:
-        if not isinstance(args, dict):
-            return ""
-
-        if tool_name in ("read", "write", "edit"):
-            for key in ("path", "filePath", "targetPath"):
-                value = args.get(key)
-                if isinstance(value, str) and value:
-                    return value
-
-        if tool_name in ("grep", "find"):
-            for key in ("pattern", "path"):
-                value = args.get(key)
-                if isinstance(value, str) and value:
-                    return value
-
-        if tool_name == "bash":
-            command = args.get("command")
-            if isinstance(command, str) and command:
-                return _truncate(_strip_shell(command), 80)
-
-        for value in args.values():
-            if isinstance(value, str) and value:
-                return _truncate(value, 60)
-        return ""
-
     def process_line(self, line: str) -> None:
         if not line.strip():
             return
@@ -436,11 +454,12 @@ class PiFormatter(_BaseFormatter):
         etype = event.get("type", "")
 
         if etype == "tool_execution_start":
-            tool_name = event.get("toolName", "?")
-            if not isinstance(tool_name, str):
-                tool_name = "?"
-            detail = self._tool_detail(tool_name, event.get("args", {}))
-            self._buffer_tool(tool_name, detail)
+            raw = event.get("toolName", "?")
+            if not isinstance(raw, str):
+                raw = "?"
+            canonical = _normalize_tool(raw)
+            detail = self._extract_detail(canonical, event.get("args", {}))
+            self._buffer_tool(canonical, detail)
 
         elif etype == "tool_execution_end":
             is_error = bool(event.get("isError"))

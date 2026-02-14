@@ -165,23 +165,18 @@ class DagRunner:
         return (self.repo_root / ".loopfarm" / "roles" / "reviewer.md").exists()
 
     def _maybe_review(
-        self, issue: dict, root_id: str, step: int, max_reviews: int
+        self, issue: dict, root_id: str, step: int
     ) -> dict:
         """Run reviewer if conditions are met. Returns the (possibly updated) issue."""
         issue_id = issue["id"]
-        review_count = issue.get("review_count", 0)
 
         # Guards
         if issue.get("outcome") != "success":
             return issue
         if not self._has_reviewer():
             return issue
-        if review_count >= max_reviews:
-            return issue
 
-        self.console.print(
-            f"  [dim]review pass {review_count + 1}/{max_reviews}[/dim]"
-        )
+        self.console.print("  [dim]review[/dim]")
 
         # Build a synthetic issue dict routed to the reviewer role
         review_issue = dict(issue)
@@ -197,9 +192,6 @@ class DagRunner:
             root_id,
             log_suffix="review",
         )
-
-        # Increment review_count (even if reviewer crashes)
-        self.store.update(issue_id, review_count=review_count + 1)
 
         # Log review to forum
         self.forum.post(
@@ -225,7 +217,7 @@ class DagRunner:
     # ------------------------------------------------------------------
 
     def run(
-        self, root_id: str, max_steps: int = 20, *, max_reviews: int = 1
+        self, root_id: str, max_steps: int = 20, *, review: bool = True
     ) -> DagResult:
         for step in range(max_steps):
             # 1. Check termination
@@ -275,9 +267,9 @@ class DagRunner:
                     self.console.print("  [red]Marked as failure[/red]")
 
             # 7b. Review phase
-            if updated["status"] == "closed":
+            if review and updated["status"] == "closed":
                 updated = self._maybe_review(
-                    updated, root_id, step + 1, max_reviews
+                    updated, root_id, step + 1
                 )
 
             # 8. Log to forum

@@ -37,7 +37,7 @@ def _run_parser(prog: str = "loopfarm run") -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog, add_help=False)
     p.add_argument("prompt", nargs="*")
     p.add_argument("--max-steps", type=int, default=20)
-    p.add_argument("--max-reviews", type=int, default=1)
+    p.add_argument("--review", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--json", action="store_true")
     return p
 
@@ -422,7 +422,7 @@ def cmd_resume(argv: list[str], console: Console) -> int:
     issue_id = argv[0]
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--max-steps", type=int, default=20)
-    p.add_argument("--max-reviews", type=int, default=1)
+    p.add_argument("--review", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv[1:])
 
@@ -479,7 +479,7 @@ def cmd_resume(argv: list[str], console: Console) -> int:
 
     runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
     result = runner.run(
-        root_id, max_steps=args.max_steps, max_reviews=args.max_reviews
+        root_id, max_steps=args.max_steps, review=args.review
     )
 
     if args.json:
@@ -650,7 +650,7 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
     result = runner.run(
         root_issue["id"],
         max_steps=args.max_steps,
-        max_reviews=args.max_reviews,
+        review=args.review,
     )
 
     if args.json:

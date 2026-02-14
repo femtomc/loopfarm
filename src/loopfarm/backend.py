@@ -35,6 +35,7 @@ class Backend:
             proc = subprocess.Popen(
                 argv,
                 cwd=cwd,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -75,6 +76,7 @@ class ClaudeBackend(Backend):
             "--output-format",
             "stream-json",
             "--verbose",
+            "--include-partial-messages",
             "--model",
             model,
             prompt,

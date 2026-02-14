@@ -251,7 +251,7 @@ class TestReviewPhase:
         has_reviewer: bool = False,
         worker_outcome: str = "success",
         reviewer_changes_outcome: bool = False,
-        max_reviews: int = 1,
+        review: bool = True,
         execution_spec: dict | None = None,
     ) -> tuple[DagRunner, IssueStore, ForumStore, dict, MagicMock]:
         """Shared helper: create a root issue, mock backend, run DAG one step."""
@@ -300,7 +300,7 @@ class TestReviewPhase:
             mock_backend.return_value = mock_proc
             mock_formatter.return_value = MagicMock()
 
-            runner.run(issue["id"], max_steps=1, max_reviews=max_reviews)
+            runner.run(issue["id"], max_steps=1, review=review)
 
         return runner, store, forum, issue, mock_proc
 
@@ -332,24 +332,15 @@ class TestReviewPhase:
         )
         assert mock_proc.run.call_count == 1
 
-    def test_max_reviews_zero_disables(self, tmp_path: Path) -> None:
-        """max_reviews=0 → no review even with reviewer.md."""
+    def test_review_false_disables(self, tmp_path: Path) -> None:
+        """review=False → no review even with reviewer.md."""
         _, store, _, issue, mock_proc = self._run_with_side_effect(
             tmp_path,
             has_reviewer=True,
             worker_outcome="success",
-            max_reviews=0,
+            review=False,
         )
         assert mock_proc.run.call_count == 1
-
-    def test_review_count_increments(self, tmp_path: Path) -> None:
-        """review_count field set to 1 after review."""
-        _, store, _, issue, _ = self._run_with_side_effect(
-            tmp_path, has_reviewer=True, worker_outcome="success"
-        )
-        updated = store.get(issue["id"])
-        assert updated is not None
-        assert updated.get("review_count") == 1
 
     def test_reviewer_creates_children(self, tmp_path: Path) -> None:
         """Reviewer changes outcome to expanded + creates children → DAG continues."""

@@ -177,6 +177,8 @@ class _BaseFormatter:
         self._summary_parts: list[str] = []
         self._pending_tool: tuple[str, str] | None = None  # (name, detail)
         self._stats: dict[str, str] = {}
+        self._live_delta_open = False
+        self._saw_live_text = False
 
     @staticmethod
     def _extract_detail(canonical_name: str, params: dict) -> str:
@@ -210,6 +212,7 @@ class _BaseFormatter:
 
     def _tool(self, name: str, detail: str = "", *, ok: bool = True) -> None:
         """Print a single-line tool invocation with success/failure indicator."""
+        self._close_live_delta()
         prefix = "\u2713" if ok else "\u2717"
         line = f"  {prefix} {name}"
         if detail:
@@ -248,12 +251,14 @@ class _BaseFormatter:
             self._tool(name, detail, ok=True)
 
     def _error(self, msg: str) -> None:
+        self._close_live_delta()
         if self.interactive:
             self.console.print(Text(f"  error: {msg}", style="red"))
         else:
             self.console.print(f"  error: {msg}", markup=False)
 
     def _info(self, msg: str) -> None:
+        self._close_live_delta()
         if self.interactive:
             self.console.print(Text(f"  {msg}", style="dim"))
         else:
@@ -289,13 +294,40 @@ class _BaseFormatter:
         ordered.extend(extras)
         self._info("stats " + " ".join(ordered))
 
-    def _accumulate(self, text: str) -> None:
+    def _print_live_text(self, text: str, *, delta: bool) -> None:
+        if not self.interactive or not text:
+            return
+        self._saw_live_text = True
+
+        if delta:
+            if not self._live_delta_open:
+                self.console.print()
+                self.console.print(Text("  agent ", style="bold green"), end="")
+                self._live_delta_open = True
+            self.console.print(text, end="", markup=False, highlight=False)
+            return
+
+        self._close_live_delta()
+        self.console.print()
+        self.console.print(Text("agent", style="bold green"))
+        self.console.print(Markdown(text.strip()))
+
+    def _close_live_delta(self) -> None:
+        if self.interactive and self._live_delta_open:
+            self.console.print()
+            self._live_delta_open = False
+
+    def _accumulate(self, text: str, *, delta: bool = False) -> None:
         """Buffer assistant text for final summary."""
         if text:
             self._summary_parts.append(text)
+            self._print_live_text(text, delta=delta)
 
     def _print_summary(self) -> None:
         """Print the final accumulated assistant message."""
+        self._close_live_delta()
+        if self.interactive and self._saw_live_text:
+            return
         text = "".join(self._summary_parts).strip()
         if not text:
             return
@@ -307,6 +339,7 @@ class _BaseFormatter:
             self.console.print(text, markup=False)
 
     def _print_prompt(self, text: str) -> None:
+        self._close_live_delta()
         if not text:
             return
         if self.interactive:
@@ -327,8 +360,6 @@ class ClaudeFormatter(_BaseFormatter):
         self._active_block_type: str | None = None
         self._active_tool_name: str | None = None
         self._active_tool_json_parts: list[str] = []
-        self._live_text_open = False
-        self._saw_live_text = False
         # Track tool names already emitted via stream events to avoid duplicates
         self._stream_tool_ids: set[str] = set()
 
@@ -349,11 +380,6 @@ class ClaudeFormatter(_BaseFormatter):
                 if not self._thinking:
                     self._thinking = True
                     self._info("thinking...")
-            elif btype == "text":
-                if self.interactive and not self._live_text_open:
-                    self.console.print(Text("  agent ", style="bold green"), end="")
-                    self._live_text_open = True
-                    self._saw_live_text = True
             elif btype == "tool_use":
                 tool_id = block.get("id", "")
                 self._active_tool_name = block.get("name", "?")
@@ -371,9 +397,7 @@ class ClaudeFormatter(_BaseFormatter):
                 elif delta.get("type") == "text_delta":
                     part = delta.get("text", "")
                     if isinstance(part, str) and part:
-                        self._accumulate(part)
-                        if self.interactive and self._live_text_open:
-                            self.console.print(part, end="", markup=False, highlight=False)
+                        self._accumulate(part, delta=True)
 
         elif inner_type == "content_block_stop":
             if self._active_block_type == "tool_use" and self._active_tool_name:
@@ -388,9 +412,7 @@ class ClaudeFormatter(_BaseFormatter):
                 detail = self._extract_detail(canonical, inp)
                 self._buffer_tool(canonical, detail)
             elif self._active_block_type == "text":
-                if self.interactive and self._live_text_open:
-                    self.console.print()
-                    self._live_text_open = False
+                self._close_live_delta()
             self._thinking = False
             self._active_block_type = None
             self._active_tool_name = None
@@ -444,14 +466,9 @@ class ClaudeFormatter(_BaseFormatter):
             self._error(event.get("error", str(event)))
 
     def finish(self) -> None:
-        if self.interactive and self._live_text_open:
-            self.console.print()
-            self._live_text_open = False
         self._flush_pending()
         self._print_stats()
-        # In interactive mode, live text deltas already displayed the message.
-        if not (self.interactive and self._saw_live_text):
-            self._print_summary()
+        self._print_summary()
 
 
 class CodexFormatter(_BaseFormatter):
@@ -760,7 +777,7 @@ class PiFormatter(_BaseFormatter):
             if assistant_event.get("type") == "text_delta":
                 delta = assistant_event.get("delta", "")
                 if isinstance(delta, str) and delta:
-                    self._accumulate(delta)
+                    self._accumulate(delta, delta=True)
             elif assistant_event.get("type") == "error":
                 error_value = assistant_event.get("error", {})
                 message = "assistant error"
@@ -773,6 +790,7 @@ class PiFormatter(_BaseFormatter):
                 self._error(message)
 
         elif etype == "message_end":
+            self._close_live_delta()
             message = event.get("message", {})
             if isinstance(message, dict) and message.get("role") == "assistant":
                 stop_reason = message.get("stopReason")

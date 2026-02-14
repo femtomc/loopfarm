@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.rule import Rule
 from rich.text import Text
 
 from .backend import get_backend
@@ -44,6 +45,21 @@ class DagRunner:
         self.forum = forum
         self.repo_root = repo_root
         self.console = console or Console()
+
+    def _rich_output(self) -> bool:
+        return bool(self.console.is_terminal and not self.console.is_dumb_terminal)
+
+    def _phase_header(self, title: str, *, subtitle: str = "", style: str = "cyan") -> None:
+        if self._rich_output():
+            self.console.print(Rule(f"[bold {style}]{title}[/bold {style}]"))
+            if subtitle:
+                self.console.print(Text(subtitle, style="dim"))
+            return
+
+        self.console.print()
+        self.console.print(f"{title}")
+        if subtitle:
+            self.console.print(f"  {subtitle}")
 
     # ------------------------------------------------------------------
     # Routing helpers
@@ -132,9 +148,6 @@ class DagRunner:
         rendered = self._render_prompt(issue, prompt_path, root_id)
 
         prompt_preview = rendered.split("## Inshallah Context", 1)[0].strip()
-        if prompt_preview:
-            if len(prompt_preview) > 320:
-                prompt_preview = prompt_preview[:317] + "..."
 
         self.console.print(
             f"  [dim]{cli} {model} reasoning={reasoning}[/dim]"
@@ -188,7 +201,11 @@ class DagRunner:
         if not self._has_reviewer():
             return issue
 
-        self.console.print("  [dim]review[/dim]")
+        self._phase_header(
+            "Review",
+            subtitle=f"{issue_id} {issue['title']}",
+            style="magenta",
+        )
 
         # Build a synthetic issue dict routed to the reviewer role
         review_issue = dict(issue)
@@ -250,8 +267,10 @@ class DagRunner:
 
             issue = candidates[0]
             issue_id = issue["id"]
-            self.console.print(
-                f"\n[bold]step {step + 1}[/bold] [dim]{issue_id}[/dim] {issue['title']}"
+            self._phase_header(
+                f"Step {step + 1}",
+                subtitle=f"{issue_id} {issue['title']}",
+                style="cyan",
             )
 
             # 3. Claim

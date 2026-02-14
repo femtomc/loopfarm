@@ -204,6 +204,29 @@ def test_codex_summary_on_finish() -> None:
     assert "Applying formatter updates." in rendered
 
 
+def test_codex_interactive_message_streams_before_finish() -> None:
+    out = io.StringIO()
+    console = Console(file=out, force_terminal=True, width=120)
+    fmt = CodexFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_2",
+                "type": "agent_message",
+                "text": "Streaming status update.",
+            },
+        },
+    )
+
+    rendered = out.getvalue()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", rendered)
+    assert "agent" in plain
+    assert "Streaming status update." in plain
+
+
 def test_codex_reasoning_suppressed() -> None:
     console, out = _console(force_terminal=False)
     fmt = CodexFormatter(console)
@@ -867,6 +890,38 @@ def test_claude_text_delta_accumulates_without_assistant_event() -> None:
 
     rendered = out.getvalue()
     assert "Hello" in rendered
+
+
+def test_claude_interactive_delta_streams_before_finish() -> None:
+    out = io.StringIO()
+    console = Console(file=out, force_terminal=True, width=120)
+    fmt = ClaudeFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "content_block": {"type": "text", "text": ""},
+            },
+        },
+    )
+    _emit(
+        fmt,
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "Hi"},
+            },
+        },
+    )
+
+    rendered = out.getvalue()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", rendered)
+    assert "agent" in plain
+    assert "Hi" in plain
 
 
 def test_claude_no_rich_artifacts() -> None:

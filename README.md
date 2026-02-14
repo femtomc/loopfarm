@@ -8,17 +8,17 @@ they can make a successful business by writing an orchestrator and talking about
 
 We used to make _things_, serious things, serious technology. Now, 
 the economy is propped up by sophists selling a dream to spiritless managers, deluded by the wandering mists of billion-dollar probability distributions. 
-Presumably, the same as it ever was.
+Can a monkey be the Buddha?
 
-Anyways, I wrote this by talking to Claude Code (and Codex ... and Gemini) and I'm sure it will make a successful business,
+Anyways, I wrote this piece of scripture by talking to Claude Code (and Codex ... and Gemini) and I'm sure it will make a successful religion,
 as long as I talk about AI on Hacker News (Gary: shoot me an email, I'm willing to consider your incubator)
 
-More to the point (of course, I would _never_ disrespect you by wasting your time) ... this is for all the people who think that putting "chat with an agent" everywhere is a good UI model -- are you a lemming? 
+More to the point (I would _never_ disrespect you by wasting your time) ... this is for all the people who think that putting "chat with an agent" everywhere is a good UI model -- are you a lemming?
 If Boris told you to jump off a cliff, would you say "Absolutely!" and hop off? Or would you compact first? Have you ever stepped back and considered that ... maybe ...
 you shouldn't just accept what is given to you blindly? This is a cardinal rule of design, along with "never fight a token war with ChatGPT 5.2 xhigh".
 
-You are insignificant, your ideas are inconsequential, and your actions reduce to the mean of all humanity (plus RL thought parabiosis): your life a perfectly middling affair, 
-wanting in creativity, careful thinking or effort. In short, we are all dust in the wind, but you are ... dustier.
+More on the nose, you are insignificant, your ideas are inconsequential, and your actions reduce to the mean of all humanity (plus RL thought parabiosis): your life a perfectly middling affair, 
+wanting in creativity, careful thinking or effort. In short, we are all dust in the wind, but you are ... dustier. But you could become _more than you are_, if you join my in-group, learn the shibboleths, and take this pilgrimage with me.
 
 ---
 

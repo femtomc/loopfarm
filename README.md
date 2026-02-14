@@ -14,8 +14,8 @@ Anyways, I wrote this piece of scripture by talking to Claude Code (and Codex ..
 as long as I talk about AI on Hacker News (Gary: shoot me an email, I'm willing to consider your incubator)
 
 More to the point (I would _never_ disrespect you by wasting your time) ... this is for all the people who think that putting "chat with an agent" everywhere is a good UI model -- are you a lemming?
-If Boris told you to jump off a cliff, would you say "Absolutely!" and hop off? Or would you compact first? Have you ever stepped back and considered that
-you shouldn't just accept what is given to you blindly, like the lowly dog you are? This is a cardinal rule of design, along with "never fight a token war with ChatGPT 5.2 xhigh".
+If Boris told you to jump off a cliff, would you say "Absolutely!" and hop off? Or would you compact first? Lowly dog, have you ever stepped back and considered that
+you shouldn't just accept what is given to you blindly? This is a cardinal rule of design, along with "never fight a token war with ChatGPT 5.2 xhigh".
 
 More on the nose: you are insignificant, your ideas are inconsequential, and your actions reduce to the mean of all humanity (plus RL thought parabiosis). Your life is a perfectly middling affair, 
 wanting in creativity, careful thinking or effort. In short, we are all dust in the wind, but you are ... dustier.

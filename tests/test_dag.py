@@ -1,9 +1,10 @@
-"""Tests for DAG runner 3-tier config resolution."""
+"""Tests for DAG runner 3-tier config resolution and review phase."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from loopfarm.dag import DagRunner
 from loopfarm.store import ForumStore, IssueStore
@@ -238,3 +239,169 @@ class TestThreeTierResolution:
             call_args = mock_proc.run.call_args
             rendered = call_args[0][0]
             assert "Worker prompt." in rendered
+
+
+class TestReviewPhase:
+    """Test the review-triggered decomposition feature."""
+
+    def _run_with_side_effect(
+        self,
+        tmp_path: Path,
+        *,
+        has_reviewer: bool = False,
+        worker_outcome: str = "success",
+        reviewer_changes_outcome: bool = False,
+        max_reviews: int = 1,
+        execution_spec: dict | None = None,
+    ) -> tuple[DagRunner, IssueStore, ForumStore, dict, MagicMock]:
+        """Shared helper: create a root issue, mock backend, run DAG one step."""
+        store, forum = _setup_stores(tmp_path)
+        _write_orchestrator(
+            tmp_path, "cli: claude\nmodel: opus\nreasoning: high\n", "{{PROMPT}}\n"
+        )
+        if has_reviewer:
+            _write_role(
+                tmp_path,
+                "reviewer",
+                "cli: claude\nmodel: opus\nreasoning: high\n",
+                "Review:\n{{PROMPT}}\n",
+            )
+
+        issue = store.create(
+            "test task",
+            tags=["node:agent", "node:root"],
+            execution_spec=execution_spec,
+        )
+        issue_id = issue["id"]
+
+        runner = DagRunner(store, forum, tmp_path)
+
+        call_count = [0]
+
+        def backend_side_effect(prompt, model, reasoning, cwd, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Worker closes the issue
+                store.close(issue_id, outcome=worker_outcome)
+            elif call_count[0] == 2 and reviewer_changes_outcome:
+                # Reviewer changes outcome to expanded and creates a child
+                store.update(issue_id, outcome="expanded")
+                child = store.create(
+                    "Fix: something",
+                    tags=["node:agent"],
+                )
+                store.add_dep(child["id"], "parent", issue_id)
+            return 0
+
+        with patch("loopfarm.dag.get_backend") as mock_backend, \
+             patch("loopfarm.dag.get_formatter") as mock_formatter:
+            mock_proc = MagicMock()
+            mock_proc.run.side_effect = backend_side_effect
+            mock_backend.return_value = mock_proc
+            mock_formatter.return_value = MagicMock()
+
+            runner.run(issue["id"], max_steps=1, max_reviews=max_reviews)
+
+        return runner, store, forum, issue, mock_proc
+
+    def test_no_review_without_reviewer_role(self, tmp_path: Path) -> None:
+        """No reviewer.md → backend called once (worker only)."""
+        _, store, _, issue, mock_proc = self._run_with_side_effect(
+            tmp_path, has_reviewer=False, worker_outcome="success"
+        )
+        assert mock_proc.run.call_count == 1
+
+    def test_review_triggered_on_success(self, tmp_path: Path) -> None:
+        """reviewer.md exists → backend called twice (worker + reviewer)."""
+        _, store, _, issue, mock_proc = self._run_with_side_effect(
+            tmp_path, has_reviewer=True, worker_outcome="success"
+        )
+        assert mock_proc.run.call_count == 2
+
+    def test_review_skipped_on_failure(self, tmp_path: Path) -> None:
+        """outcome=failure → no review."""
+        _, store, _, issue, mock_proc = self._run_with_side_effect(
+            tmp_path, has_reviewer=True, worker_outcome="failure"
+        )
+        assert mock_proc.run.call_count == 1
+
+    def test_review_skipped_on_expanded(self, tmp_path: Path) -> None:
+        """outcome=expanded → no review."""
+        _, store, _, issue, mock_proc = self._run_with_side_effect(
+            tmp_path, has_reviewer=True, worker_outcome="expanded"
+        )
+        assert mock_proc.run.call_count == 1
+
+    def test_max_reviews_zero_disables(self, tmp_path: Path) -> None:
+        """max_reviews=0 → no review even with reviewer.md."""
+        _, store, _, issue, mock_proc = self._run_with_side_effect(
+            tmp_path,
+            has_reviewer=True,
+            worker_outcome="success",
+            max_reviews=0,
+        )
+        assert mock_proc.run.call_count == 1
+
+    def test_review_count_increments(self, tmp_path: Path) -> None:
+        """review_count field set to 1 after review."""
+        _, store, _, issue, _ = self._run_with_side_effect(
+            tmp_path, has_reviewer=True, worker_outcome="success"
+        )
+        updated = store.get(issue["id"])
+        assert updated is not None
+        assert updated.get("review_count") == 1
+
+    def test_reviewer_creates_children(self, tmp_path: Path) -> None:
+        """Reviewer changes outcome to expanded + creates children → DAG continues."""
+        _, store, _, issue, mock_proc = self._run_with_side_effect(
+            tmp_path,
+            has_reviewer=True,
+            worker_outcome="success",
+            reviewer_changes_outcome=True,
+        )
+        assert mock_proc.run.call_count == 2
+        updated = store.get(issue["id"])
+        assert updated is not None
+        assert updated.get("outcome") == "expanded"
+        children = store.children(issue["id"])
+        assert len(children) == 1
+        assert children[0]["title"] == "Fix: something"
+
+    def test_resolve_config_regression(self, tmp_path: Path) -> None:
+        """Extracted _resolve_config produces same results as old inline code."""
+        store, forum = _setup_stores(tmp_path)
+        _write_orchestrator(
+            tmp_path, "cli: codex\nmodel: gpt-5.3\nreasoning: xhigh\n", "{{PROMPT}}\n"
+        )
+        _write_role(
+            tmp_path, "worker", "cli: claude\nmodel: opus\nreasoning: high\n", "Worker.\n"
+        )
+        issue = store.create(
+            "test task",
+            tags=["node:agent", "node:root"],
+            execution_spec={"role": "worker", "model": "o3"},
+        )
+
+        runner = DagRunner(store, forum, tmp_path)
+        cli, model, reasoning, prompt_path = runner._resolve_config(issue)
+
+        # cli from role (claude), model from explicit spec (o3), reasoning from role (high)
+        assert cli == "claude"
+        assert model == "o3"
+        assert reasoning == "high"
+        assert prompt_path is not None
+        assert "worker.md" in prompt_path
+
+    def test_review_logged_to_forum(self, tmp_path: Path) -> None:
+        """Forum has entry with author=reviewer, type=review."""
+        _, store, forum, issue, _ = self._run_with_side_effect(
+            tmp_path, has_reviewer=True, worker_outcome="success"
+        )
+        messages = forum.read(f"issue:{issue['id']}")
+        review_msgs = [
+            m for m in messages
+            if m.get("author") == "reviewer"
+        ]
+        assert len(review_msgs) == 1
+        body = json.loads(review_msgs[0]["body"])
+        assert body["type"] == "review"

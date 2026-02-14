@@ -109,6 +109,7 @@ def render(path: str | Path, issue: dict, *, repo_root: Path | None = None) -> s
         prompt_text += "\n\n" + issue["body"]
 
     body = body.replace("{{PROMPT}}", prompt_text)
+    body = body.replace("{{ISSUE_ID}}", issue.get("id", ""))
 
     if "{{ROLES}}" in body:
         catalog = build_role_catalog(repo_root) if repo_root else ""

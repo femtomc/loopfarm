@@ -25,3 +25,7 @@ def test_init_writes_prompt_descriptions(tmp_path: Path) -> None:
     assert "description: Plan and decompose root goals into atomic issues, assign the best role to each issue, and manage dependency order." in orchestrator
     assert "loopfarm roles --pretty" in orchestrator
     assert "description: Best for concrete execution tasks; implement exactly one atomic issue (code/tests/docs), verify results, then close with a terminal outcome." in worker
+
+    reviewer = (tmp_path / ".loopfarm" / "roles" / "reviewer.md").read_text()
+    assert "description: Independently verify completed work and either approve or decompose into targeted refinements." in reviewer
+    assert "{{ISSUE_ID}}" in reviewer

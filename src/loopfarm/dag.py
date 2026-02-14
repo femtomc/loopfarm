@@ -43,7 +43,190 @@ class DagRunner:
         self.repo_root = repo_root
         self.console = console or Console()
 
-    def run(self, root_id: str, max_steps: int = 20) -> DagResult:
+    # ------------------------------------------------------------------
+    # Routing helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_config(
+        self, issue: dict
+    ) -> tuple[str, str, str, str | None]:
+        """3-tier resolution: orchestrator.md → role frontmatter → execution_spec.
+
+        Returns (cli, model, reasoning, prompt_path).
+        """
+        cli = self._FALLBACK_CLI
+        model = self._FALLBACK_MODEL
+        reasoning = self._FALLBACK_REASONING
+        prompt_path: str | None = None
+
+        # Tier 1: orchestrator.md frontmatter (global defaults)
+        orchestrator = self.repo_root / ".loopfarm" / "orchestrator.md"
+        if orchestrator.exists():
+            meta = read_prompt_meta(orchestrator)
+            cli = meta.get("cli", cli)
+            model = meta.get("model", model)
+            reasoning = meta.get("reasoning", reasoning)
+            prompt_path = str(orchestrator)
+
+        # Parse execution_spec (may set role + explicit fields)
+        spec: ExecutionSpec | None = None
+        if issue.get("execution_spec"):
+            spec = ExecutionSpec.from_dict(
+                issue["execution_spec"], self.repo_root
+            )
+
+        # Tier 2: role file frontmatter (role-specific defaults)
+        if spec and spec.role:
+            role_path = self.repo_root / ".loopfarm" / "roles" / f"{spec.role}.md"
+            if role_path.exists():
+                role_meta = read_prompt_meta(role_path)
+                cli = role_meta.get("cli", cli)
+                model = role_meta.get("model", model)
+                reasoning = role_meta.get("reasoning", reasoning)
+
+        # Tier 3: execution_spec explicit fields (highest priority)
+        if spec:
+            if spec.cli is not None:
+                cli = spec.cli
+            if spec.model is not None:
+                model = spec.model
+            if spec.reasoning is not None:
+                reasoning = spec.reasoning
+            if spec.prompt_path:
+                prompt_path = spec.prompt_path
+
+        return cli, model, reasoning, prompt_path
+
+    def _render_prompt(
+        self, issue: dict, prompt_path: str | None, root_id: str
+    ) -> str:
+        """Render prompt template + inject DAG context."""
+        if prompt_path and Path(prompt_path).exists():
+            rendered = render(prompt_path, issue, repo_root=self.repo_root)
+        else:
+            rendered = issue["title"]
+            if issue.get("body"):
+                rendered += "\n\n" + issue["body"]
+
+        rendered += (
+            f"\n\n## Loopfarm Context\n"
+            f"Root: {root_id}\n"
+            f"Assigned issue: {issue['id']}\n"
+        )
+        return rendered
+
+    def _execute_backend(
+        self,
+        issue: dict,
+        cli: str,
+        model: str,
+        reasoning: str,
+        prompt_path: str | None,
+        root_id: str,
+        *,
+        log_suffix: str = "",
+    ) -> tuple[int, float]:
+        """Run a backend against the issue. Returns (exit_code, elapsed_seconds)."""
+        rendered = self._render_prompt(issue, prompt_path, root_id)
+
+        self.console.print(
+            f"  [dim]{cli} {model} reasoning={reasoning}[/dim]"
+        )
+        backend = get_backend(cli)
+        formatter = get_formatter(cli, self.console)
+
+        tee_dir = self.repo_root / ".loopfarm" / "logs"
+        tee_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f".{log_suffix}" if log_suffix else ""
+        tee_path = tee_dir / f"{issue['id']}{suffix}.jsonl"
+
+        t0 = time.time()
+        exit_code = backend.run(
+            rendered,
+            model,
+            reasoning,
+            self.repo_root,
+            on_line=formatter.process_line,
+            tee_path=tee_path,
+        )
+        formatter.finish()
+        elapsed = time.time() - t0
+
+        self.console.print(
+            f"  [dim]exit={exit_code} {elapsed:.1f}s[/dim]"
+        )
+        return exit_code, elapsed
+
+    # ------------------------------------------------------------------
+    # Review helpers
+    # ------------------------------------------------------------------
+
+    def _has_reviewer(self) -> bool:
+        return (self.repo_root / ".loopfarm" / "roles" / "reviewer.md").exists()
+
+    def _maybe_review(
+        self, issue: dict, root_id: str, step: int, max_reviews: int
+    ) -> dict:
+        """Run reviewer if conditions are met. Returns the (possibly updated) issue."""
+        issue_id = issue["id"]
+        review_count = issue.get("review_count", 0)
+
+        # Guards
+        if issue.get("outcome") != "success":
+            return issue
+        if not self._has_reviewer():
+            return issue
+        if review_count >= max_reviews:
+            return issue
+
+        self.console.print(
+            f"  [dim]review pass {review_count + 1}/{max_reviews}[/dim]"
+        )
+
+        # Build a synthetic issue dict routed to the reviewer role
+        review_issue = dict(issue)
+        review_issue["execution_spec"] = {"role": "reviewer"}
+
+        cli, model, reasoning, prompt_path = self._resolve_config(review_issue)
+        exit_code, elapsed = self._execute_backend(
+            review_issue,
+            cli,
+            model,
+            reasoning,
+            prompt_path,
+            root_id,
+            log_suffix="review",
+        )
+
+        # Increment review_count (even if reviewer crashes)
+        self.store.update(issue_id, review_count=review_count + 1)
+
+        # Log review to forum
+        self.forum.post(
+            f"issue:{issue_id}",
+            json.dumps(
+                {
+                    "step": step,
+                    "issue_id": issue_id,
+                    "title": issue["title"],
+                    "exit_code": exit_code,
+                    "elapsed_s": round(elapsed, 1),
+                    "type": "review",
+                }
+            ),
+            author="reviewer",
+        )
+
+        # Re-read in case reviewer changed outcome / created children
+        return self.store.get(issue_id) or issue
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    def run(
+        self, root_id: str, max_steps: int = 20, *, max_reviews: int = 1
+    ) -> DagResult:
         for step in range(max_steps):
             # 1. Check termination
             v = self.store.validate(root_id)
@@ -70,90 +253,10 @@ class DagRunner:
             # 3. Claim
             self.store.claim(issue_id)
 
-            # 4. Route: determine backend, model, prompt
-            # 3-tier priority: execution_spec fields > role frontmatter > orchestrator.md > fallbacks
-            cli = self._FALLBACK_CLI
-            model = self._FALLBACK_MODEL
-            reasoning = self._FALLBACK_REASONING
-            prompt_path: str | None = None
-
-            # Tier 1: orchestrator.md frontmatter (global defaults)
-            orchestrator = self.repo_root / ".loopfarm" / "orchestrator.md"
-            if orchestrator.exists():
-                meta = read_prompt_meta(orchestrator)
-                cli = meta.get("cli", cli)
-                model = meta.get("model", model)
-                reasoning = meta.get("reasoning", reasoning)
-                prompt_path = str(orchestrator)
-
-            # Parse execution_spec (may set role + explicit fields)
-            spec: ExecutionSpec | None = None
-            if issue.get("execution_spec"):
-                spec = ExecutionSpec.from_dict(
-                    issue["execution_spec"], self.repo_root
-                )
-
-            # Tier 2: role file frontmatter (role-specific defaults)
-            if spec and spec.role:
-                role_path = self.repo_root / ".loopfarm" / "roles" / f"{spec.role}.md"
-                if role_path.exists():
-                    role_meta = read_prompt_meta(role_path)
-                    cli = role_meta.get("cli", cli)
-                    model = role_meta.get("model", model)
-                    reasoning = role_meta.get("reasoning", reasoning)
-
-            # Tier 3: execution_spec explicit fields (highest priority)
-            if spec:
-                if spec.cli is not None:
-                    cli = spec.cli
-                if spec.model is not None:
-                    model = spec.model
-                if spec.reasoning is not None:
-                    reasoning = spec.reasoning
-                if spec.prompt_path:
-                    prompt_path = spec.prompt_path
-
-            # 5. Render prompt
-            if prompt_path and Path(prompt_path).exists():
-                rendered = render(prompt_path, issue, repo_root=self.repo_root)
-            else:
-                # No prompt template — use issue title+body directly
-                rendered = issue["title"]
-                if issue.get("body"):
-                    rendered += "\n\n" + issue["body"]
-
-            # 5b. Inject DAG context so the agent knows its assignment
-            rendered += (
-                f"\n\n## Loopfarm Context\n"
-                f"Root: {root_id}\n"
-                f"Assigned issue: {issue_id}\n"
-            )
-
-            # 6. Run backend
-            self.console.print(
-                f"  [dim]{cli} {model} reasoning={reasoning}[/dim]"
-            )
-            backend = get_backend(cli)
-            formatter = get_formatter(cli, self.console)
-
-            tee_dir = self.repo_root / ".loopfarm" / "logs"
-            tee_dir.mkdir(parents=True, exist_ok=True)
-            tee_path = tee_dir / f"{issue_id}.jsonl"
-
-            t0 = time.time()
-            exit_code = backend.run(
-                rendered,
-                model,
-                reasoning,
-                self.repo_root,
-                on_line=formatter.process_line,
-                tee_path=tee_path,
-            )
-            formatter.finish()
-            elapsed = time.time() - t0
-
-            self.console.print(
-                f"  [dim]exit={exit_code} {elapsed:.1f}s[/dim]"
+            # 4. Route + 5. Render + 6. Execute
+            cli, model, reasoning, prompt_path = self._resolve_config(issue)
+            exit_code, elapsed = self._execute_backend(
+                issue, cli, model, reasoning, prompt_path, root_id
             )
 
             # 7. Check postconditions
@@ -170,6 +273,12 @@ class DagRunner:
                 if exit_code != 0:
                     updated = self.store.close(issue_id, outcome="failure")
                     self.console.print("  [red]Marked as failure[/red]")
+
+            # 7b. Review phase
+            if updated["status"] == "closed":
+                updated = self._maybe_review(
+                    updated, root_id, step + 1, max_reviews
+                )
 
             # 8. Log to forum
             self.forum.post(

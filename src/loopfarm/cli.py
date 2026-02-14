@@ -36,6 +36,7 @@ def _run_parser(prog: str = "loopfarm run") -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog, add_help=False)
     p.add_argument("prompt", nargs="*")
     p.add_argument("--max-steps", type=int, default=20)
+    p.add_argument("--max-reviews", type=int, default=1)
     p.add_argument("--json", action="store_true")
     return p
 
@@ -168,6 +169,38 @@ def cmd_init(console: Console) -> int:
             "loopfarm forum post issue:<id> -m \"status update\" --author worker\n"
             "loopfarm issues close <id> --outcome success\n"
             "```\n"
+        )
+
+    reviewer = roles_dir / "reviewer.md"
+    if not reviewer.exists():
+        reviewer.write_text(
+            "---\n"
+            "description: Independently verify completed work and either approve or decompose into targeted refinements.\n"
+            "cli: claude\n"
+            "model: opus\n"
+            "reasoning: high\n"
+            "---\n\n"
+            "You are a code reviewer evaluating whether a completed issue was properly\n"
+            "implemented.\n\n"
+            "## Issue Under Review\n\n"
+            "{{PROMPT}}\n\n"
+            "## Evaluation Criteria\n\n"
+            "1. **Completeness**: Does the implementation fully address the issue?\n"
+            "2. **Correctness**: Is the code logically sound? Do tests pass?\n"
+            "3. **Quality**: Does the code follow existing patterns?\n\n"
+            "## Actions\n\n"
+            "### If the work is correct and complete:\n"
+            "Do nothing. The issue stays closed with outcome=success.\n\n"
+            "### If the work needs targeted fixes:\n"
+            "1. Change the outcome:\n"
+            "   `loopfarm issues update {{ISSUE_ID}} --outcome expanded`\n"
+            "2. Create specific child issues for each fix:\n"
+            "   `loopfarm issues create \"Fix: <problem>\" --body \"<details>\" --parent {{ISSUE_ID}} --role worker`\n\n"
+            "## Rules\n\n"
+            "- Only change outcome to `expanded` if there are real functional issues.\n"
+            "- Each child issue must be atomic and actionable.\n"
+            "- DO NOT create children for style nitpicks.\n"
+            "- DO NOT modify code yourself. Evaluation only.\n"
         )
 
     (lf / "logs").mkdir(exist_ok=True)
@@ -313,6 +346,7 @@ def cmd_resume(argv: list[str], console: Console) -> int:
     issue_id = argv[0]
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--max-steps", type=int, default=20)
+    p.add_argument("--max-reviews", type=int, default=1)
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv[1:])
 
@@ -351,7 +385,9 @@ def cmd_resume(argv: list[str], console: Console) -> int:
     )
 
     runner = DagRunner(store, forum, root, console=console)
-    result = runner.run(root_id, max_steps=args.max_steps)
+    result = runner.run(
+        root_id, max_steps=args.max_steps, max_reviews=args.max_reviews
+    )
 
     if args.json:
         _output(
@@ -447,7 +483,11 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
     )
 
     runner = DagRunner(store, forum, root, console=console)
-    result = runner.run(root_issue["id"], max_steps=args.max_steps)
+    result = runner.run(
+        root_issue["id"],
+        max_steps=args.max_steps,
+        max_reviews=args.max_reviews,
+    )
 
     if args.json:
         _output(

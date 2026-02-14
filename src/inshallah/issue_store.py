@@ -203,7 +203,10 @@ class IssueStore:
         blocked: set[str] = set()
         for row in rows:
             for dep in row.get("deps", []):
-                if dep["type"] == "blocks" and row["status"] != "closed":
+                if dep["type"] == "blocks" and (
+                    row["status"] != "closed"
+                    or row.get("outcome") == "expanded"
+                ):
                     blocked.add(dep["target"])
 
         result = []

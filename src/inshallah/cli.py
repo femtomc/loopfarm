@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -155,105 +156,19 @@ def cmd_init(console: Console) -> int:
     (lf / "issues.jsonl").touch()
     (lf / "forum.jsonl").touch()
 
+    # Copy default prompt templates from package into .inshallah/
+    prompts_dir = Path(__file__).parent / "prompts"
+
     orch = lf / "orchestrator.md"
     if not orch.exists():
-        orch.write_text(
-            "---\n"
-            "description: Plan and decompose root goals into atomic issues, assign the best role to each issue, and manage dependency order.\n"
-            "cli: codex\n"
-            "model: gpt-5.3-codex\n"
-            "reasoning: xhigh\n"
-            "---\n\n"
-            "You are the hierarchical orchestrator for the issue DAG.\n\n"
-            "User prompt:\n\n"
-            "{{PROMPT}}\n\n"
-            "## Available Roles\n\n"
-            "{{ROLES}}\n\n"
-            "## Responsibilities\n\n"
-            "1. Decide whether the selected issue is atomic.\n"
-            "2. If the issue previously failed or was marked `needs_work`, read the forum topic (`issue:<id>`) for context and create remediation children.\n"
-            "3. If not atomic, decompose into child issues with `outcome=expanded`.\n"
-            "4. Assign a role to each child via `execution_spec.role`.\n"
-            "5. Use `blocks` dependencies for sequential ordering.\n"
-            "6. Keep decomposition deterministic and minimal.\n\n"
-            "## CLI Quick Reference\n\n"
-            "```bash\n"
-            "# Inspect graph state\n"
-            "inshallah issues get <id>\n"
-            "inshallah issues list --root <root-id>\n"
-            "inshallah issues children <id>\n"
-            "inshallah issues ready --root <root-id>\n"
-            "inshallah issues validate <root-id>\n"
-            "inshallah roles --pretty\n\n"
-            "# Decompose work\n"
-            "inshallah issues create \"Title\" --body \"Details\" --parent <id> --role worker --priority 2\n"
-            "inshallah issues dep <src-id> blocks <dst-id>\n"
-            "inshallah issues update <id> --role worker\n"
-            "inshallah issues close <id> --outcome expanded\n\n"
-            "# Collaborate\n"
-            "inshallah forum post issue:<id> -m \"notes\" --author orchestrator\n"
-            "inshallah forum read issue:<id> --limit 20\n"
-            "```\n"
-        )
+        shutil.copy2(prompts_dir / "orchestrator.md", orch)
 
     roles_dir = lf / "roles"
     roles_dir.mkdir(exist_ok=True)
-    worker = roles_dir / "worker.md"
-    if not worker.exists():
-        worker.write_text(
-            "---\n"
-            "description: Best for concrete execution tasks; implement exactly one atomic issue (code/tests/docs), verify results, then close with a terminal outcome.\n"
-            "cli: codex\n"
-            "model: gpt-5.3-codex\n"
-            "reasoning: xhigh\n"
-            "---\n\n"
-            "You are a worker role executing one atomic issue.\n\n"
-            "User prompt:\n\n"
-            "{{PROMPT}}\n\n"
-            "## Responsibilities\n\n"
-            "1. Execute exactly one selected atomic issue end-to-end.\n"
-            "2. Keep scope tight to the selected issue.\n"
-            "3. Close with a terminal outcome: success, failure, or skipped.\n\n"
-            "## CLI Quick Reference\n\n"
-            "```bash\n"
-            "inshallah issues get <id>\n"
-            "inshallah issues update <id> --status in_progress\n"
-            "inshallah forum post issue:<id> -m \"status update\" --author worker\n"
-            "inshallah issues close <id> --outcome success\n"
-            "```\n"
-        )
-
-    reviewer = roles_dir / "reviewer.md"
-    if not reviewer.exists():
-        reviewer.write_text(
-            "---\n"
-            "description: Independently verify completed work and either approve or mark the issue as needs_work.\n"
-            "cli: codex\n"
-            "model: gpt-5.3-codex\n"
-            "reasoning: xhigh\n"
-            "---\n\n"
-            "You are a code reviewer evaluating whether a completed issue was properly\n"
-            "implemented.\n\n"
-            "## Issue Under Review\n\n"
-            "{{PROMPT}}\n\n"
-            "## Evaluation Criteria\n\n"
-            "1. **Completeness**: Does the implementation fully address the issue?\n"
-            "2. **Correctness**: Is the code logically sound? Do tests pass?\n"
-            "3. **Quality**: Does the code follow existing patterns?\n\n"
-            "## Actions\n\n"
-            "### If the work is correct and complete:\n"
-            "Do nothing. The issue stays closed with outcome=success.\n\n"
-            "### If the work needs targeted fixes:\n"
-            "1. Post a concrete explanation of what's wrong and what must change:\n"
-            "   `inshallah forum post issue:{{ISSUE_ID}} -m \"<what failed + acceptance criteria>\" --author reviewer`\n"
-            "2. Mark the issue as needing work:\n"
-            "   `inshallah issues update {{ISSUE_ID}} --outcome needs_work`\n\n"
-            "The orchestrator will re-expand the issue into remediation children.\n\n"
-            "## Rules\n\n"
-            "- DO NOT create children for style nitpicks.\n"
-            "- DO NOT modify code yourself. Evaluation only.\n"
-            "- DO NOT create new issues. Mark needs_work and explain why.\n"
-        )
+    for role_name in ("worker", "reviewer"):
+        dest = roles_dir / f"{role_name}.md"
+        if not dest.exists():
+            shutil.copy2(prompts_dir / "roles" / f"{role_name}.md", dest)
 
     (lf / "logs").mkdir(exist_ok=True)
     console.print(

@@ -20,3 +20,6 @@ testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inshallah"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/inshallah/prompts" = "inshallah/prompts"

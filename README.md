@@ -122,4 +122,4 @@ This is the breathing pattern: the DAG expands when planning decomposes goals, a
    ✓      ✗ → re-orchestrate
 ```
 
-The DAG is stored as flat JSONL. No external database, no migration headaches. Issues are human-readable, greppable, and durable across sessions. The forum (also JSONL) stores coordination messages between agents — execution logs, review outcomes, status updates — providing a persistent audit trail.
+The DAG is stored as flat JSONL. The forum (also JSONL) stores coordination messages between agents — execution logs, review outcomes, status updates — providing a (somewhat complete) persistent audit trail.

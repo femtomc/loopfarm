@@ -28,6 +28,9 @@ venv/
 # loopfarm runtime state (issues/forum/session/control DB + generated local prompts)
 .loopfarm/
 
+# inshallah runtime state (store directory when running inshallah from this repo)
+.inshallah/
+
 # Environment files
 .env
 .env.*

@@ -18,6 +18,7 @@ def test_init_writes_prompt_descriptions(tmp_path: Path) -> None:
         rc = cmd_init(console)
 
     assert rc == 0
+    assert (tmp_path / ".inshallah" / "events.jsonl").exists()
 
     orchestrator = (tmp_path / ".inshallah" / "orchestrator.md").read_text()
     worker = (tmp_path / ".inshallah" / "roles" / "worker.md").read_text()

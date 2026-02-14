@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .events import EventLog
 from .jsonl import now_ts, read_jsonl, write_jsonl
 
 
@@ -12,6 +13,7 @@ class ForumStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self.events = EventLog(path.parent / "events.jsonl")
 
     @classmethod
     def from_workdir(cls, root: Path | None = None) -> ForumStore:
@@ -19,6 +21,12 @@ class ForumStore:
         return cls(root / ".inshallah" / "forum.jsonl")
 
     def post(self, topic: str, body: str, author: str = "system") -> dict:
+        issue_id: str | None = None
+        if topic.startswith("issue:") and len(topic.split(":", 1)) == 2:
+            candidate = topic.split(":", 1)[1].strip()
+            if candidate:
+                issue_id = candidate
+
         msg = {
             "topic": topic,
             "body": body,
@@ -28,6 +36,12 @@ class ForumStore:
         rows = read_jsonl(self.path)
         rows.append(msg)
         write_jsonl(self.path, rows)
+        self.events.emit(
+            "forum.post",
+            source="forum_store",
+            issue_id=issue_id,
+            payload={"message": msg},
+        )
         return msg
 
     def read(self, topic: str, limit: int = 50) -> list[dict]:

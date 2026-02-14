@@ -1,5 +1,5 @@
 import type { Store } from "./store";
-import { renderIssuesPage } from "./html";
+import { renderEventsPage, renderIssuesPage } from "./html";
 import { badRequest, htmlResponse, internalServerError, jsonResponse, methodNotAllowed, notFound } from "./responses";
 
 function parseLimit(value: string | null, defaultLimit: number): number {
@@ -20,6 +20,22 @@ export async function handleRequest(req: Request, ctx: { storeRoot: string; stor
     if (pathname === "/" || pathname === "/issues") {
       const issues = await ctx.store.listIssues();
       return htmlResponse(renderIssuesPage({ storeRoot: ctx.storeRoot, issues }));
+    }
+
+    if (pathname === "/events") {
+      const issue_id = url.searchParams.get("issue_id")?.trim() || undefined;
+      const run_id = url.searchParams.get("run_id")?.trim() || undefined;
+      const type = url.searchParams.get("type")?.trim() || undefined;
+      const limit = Math.min(parseLimit(url.searchParams.get("limit"), 200), 5000);
+
+      const events = await ctx.store.queryEvents({ issue_id, run_id, type, limit });
+      return htmlResponse(
+        renderEventsPage({
+          storeRoot: ctx.storeRoot,
+          query: { issue_id, run_id, type, limit },
+          events,
+        }),
+      );
     }
 
     if (pathname === "/api/issues") {
@@ -57,9 +73,17 @@ export async function handleRequest(req: Request, ctx: { storeRoot: string; stor
       return jsonResponse(messages);
     }
 
+    if (pathname === "/api/events") {
+      const issue_id = url.searchParams.get("issue_id")?.trim() || undefined;
+      const run_id = url.searchParams.get("run_id")?.trim() || undefined;
+      const type = url.searchParams.get("type")?.trim() || undefined;
+      const limit = Math.min(parseLimit(url.searchParams.get("limit"), 200), 5000);
+      const events = await ctx.store.queryEvents({ issue_id, run_id, type, limit });
+      return jsonResponse(events);
+    }
+
     return notFound("not found");
   } catch (err) {
     return internalServerError(err);
   }
 }
-

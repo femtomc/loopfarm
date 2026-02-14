@@ -19,6 +19,7 @@ from rich.text import Text
 
 from . import __version__
 from .dag import DagRunner
+from .events import new_run_id, run_context
 from .fmt import get_formatter
 from .forum_store import ForumStore
 from .issue_store import IssueStore
@@ -155,6 +156,7 @@ def cmd_init(console: Console, *, force: bool = False) -> int:
     lf.mkdir(exist_ok=True)
     (lf / "issues.jsonl").touch()
     (lf / "forum.jsonl").touch()
+    (lf / "events.jsonl").touch()
 
     # Copy default prompt templates from package into .inshallah/
     prompts_dir = Path(__file__).parent / "prompts"
@@ -395,10 +397,12 @@ def cmd_resume(argv: list[str], console: Console) -> int:
             )
         )
 
-    runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
-    result = runner.run(
-        root_id, max_steps=args.max_steps, review=args.review
-    )
+    run_id = new_run_id()
+    with run_context(run_id=run_id):
+        runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
+        result = runner.run(
+            root_id, max_steps=args.max_steps, review=args.review
+        )
 
     if args.json:
         _output(
@@ -553,24 +557,26 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
         )
         return 1
 
-    root_issue = store.create(prompt_text, tags=["node:agent", "node:root"])
-    if not args.json:
-        console.print(
-            Panel(
-                Markdown(prompt_text),
-                title="Root Issue",
-                subtitle=root_issue["id"],
-                style="cyan",
-                expand=False,
+    run_id = new_run_id()
+    with run_context(run_id=run_id):
+        root_issue = store.create(prompt_text, tags=["node:agent", "node:root"])
+        if not args.json:
+            console.print(
+                Panel(
+                    Markdown(prompt_text),
+                    title="Root Issue",
+                    subtitle=root_issue["id"],
+                    style="cyan",
+                    expand=False,
+                )
             )
-        )
 
-    runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
-    result = runner.run(
-        root_issue["id"],
-        max_steps=args.max_steps,
-        review=args.review,
-    )
+        runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
+        result = runner.run(
+            root_issue["id"],
+            max_steps=args.max_steps,
+            review=args.review,
+        )
 
     if args.json:
         _output(

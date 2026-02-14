@@ -13,6 +13,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 from .backend import get_backend
+from .events import EventLog, current_run_id, new_run_id, run_context
 from .fmt import get_formatter
 from .prompt import read_prompt_meta, render
 from .forum_store import ForumStore
@@ -45,6 +46,7 @@ class DagRunner:
         self.forum = forum
         self.repo_root = repo_root
         self.console = console or Console()
+        self.events = EventLog.from_repo_root(repo_root)
 
     _REORCHESTRATE_OUTCOMES = {"failure", "needs_work"}
 
@@ -167,6 +169,26 @@ class DagRunner:
         suffix = f".{log_suffix}" if log_suffix else ""
         tee_path = tee_dir / f"{issue['id']}{suffix}.jsonl"
 
+        def _rel(p: Path) -> str:
+            try:
+                return str(p.relative_to(self.repo_root))
+            except ValueError:
+                return str(p)
+
+        self.events.emit(
+            "backend.run.start",
+            source="backend",
+            issue_id=issue["id"],
+            payload={
+                "cli": cli,
+                "model": model,
+                "reasoning": reasoning,
+                "prompt_path": prompt_path,
+                "tee_path": _rel(tee_path),
+                "log_suffix": log_suffix,
+            },
+        )
+
         t0 = time.time()
         exit_code = backend.run(
             rendered,
@@ -178,6 +200,19 @@ class DagRunner:
         )
         formatter.finish()
         elapsed = time.time() - t0
+
+        self.events.emit(
+            "backend.run.end",
+            source="backend",
+            issue_id=issue["id"],
+            payload={
+                "cli": cli,
+                "exit_code": exit_code,
+                "elapsed_s": round(elapsed, 3),
+                "tee_path": _rel(tee_path),
+                "log_suffix": log_suffix,
+            },
+        )
 
         self.console.print(
             f"  [dim]exit={exit_code} {elapsed:.1f}s[/dim]"
@@ -202,6 +237,13 @@ class DagRunner:
             return issue
         if not self._has_reviewer():
             return issue
+
+        self.events.emit(
+            "dag.review.start",
+            source="dag_runner",
+            issue_id=issue_id,
+            payload={"root_id": root_id, "step": step},
+        )
 
         self._phase_header(
             "Review",
@@ -241,7 +283,14 @@ class DagRunner:
         )
 
         # Re-read in case reviewer changed outcome / created children
-        return self.store.get(issue_id) or issue
+        updated = self.store.get(issue_id) or issue
+        self.events.emit(
+            "dag.review.end",
+            source="dag_runner",
+            issue_id=issue_id,
+            payload={"root_id": root_id, "step": step, "outcome": updated.get("outcome")},
+        )
+        return updated
 
     def _reopen_for_orchestration(
         self, issue_id: str, *, reason: str, step: int
@@ -249,6 +298,12 @@ class DagRunner:
         """Reopen an issue and clear execution routing so orchestrator.md runs next."""
         reopened = self.store.update(
             issue_id, status="open", outcome=None, execution_spec=None
+        )
+        self.events.emit(
+            "dag.unstick.reopen",
+            source="dag_runner",
+            issue_id=issue_id,
+            payload={"reason": reason, "step": step},
         )
 
         # Log to forum so the orchestrator can pick up failure / review context.
@@ -331,6 +386,13 @@ class DagRunner:
     ) -> None:
         """Run a collapse review on an expanded node whose children are all done."""
         issue_id = issue["id"]
+
+        self.events.emit(
+            "dag.collapse_review.start",
+            source="dag_runner",
+            issue_id=issue_id,
+            payload={"root_id": root_id, "step": step},
+        )
 
         self._phase_header(
             "Collapse Review",
@@ -415,11 +477,33 @@ class DagRunner:
                 f"  [yellow]Collapse review left issue open — {issue_id} "
                 f"will be handled by the main loop[/yellow]"
             )
+            self.events.emit(
+                "dag.collapse_review.end",
+                source="dag_runner",
+                issue_id=issue_id,
+                payload={
+                    "root_id": root_id,
+                    "step": step,
+                    "status": updated.get("status"),
+                    "outcome": updated.get("outcome"),
+                },
+            )
             return
         if updated.get("outcome") in self._REORCHESTRATE_OUTCOMES:
             self.console.print(
                 f"  [yellow]Collapse review marked needs_work — {issue_id} "
                 f"will be re-orchestrated[/yellow]"
+            )
+            self.events.emit(
+                "dag.collapse_review.end",
+                source="dag_runner",
+                issue_id=issue_id,
+                payload={
+                    "root_id": root_id,
+                    "step": step,
+                    "status": updated.get("status"),
+                    "outcome": updated.get("outcome"),
+                },
             )
             return
 
@@ -428,12 +512,30 @@ class DagRunner:
                 f"  [yellow]Collapse review created {len(open_kids)} "
                 f"remediation issue(s) — loop continues[/yellow]"
             )
+            self.events.emit(
+                "dag.collapse_review.end",
+                source="dag_runner",
+                issue_id=issue_id,
+                payload={
+                    "root_id": root_id,
+                    "step": step,
+                    "status": updated.get("status"),
+                    "outcome": updated.get("outcome"),
+                    "open_kids": len(open_kids),
+                },
+            )
             return
 
         # All satisfied — promote to success
         self.store.update(issue_id, outcome="success")
         self.console.print(
             f"  [green]Collapse review passed — {issue_id} → success[/green]"
+        )
+        self.events.emit(
+            "dag.collapse_review.end",
+            source="dag_runner",
+            issue_id=issue_id,
+            payload={"root_id": root_id, "step": step, "outcome": "success"},
         )
 
     # ------------------------------------------------------------------
@@ -443,160 +545,233 @@ class DagRunner:
     def run(
         self, root_id: str, max_steps: int = 20, *, review: bool = True
     ) -> DagResult:
-        for step in range(max_steps):
-            # 0. Unstick: failures / needs_work trigger re-orchestration.
-            self._maybe_unstick(root_id, step + 1)
+        run_id = current_run_id() or new_run_id()
+        with run_context(run_id=run_id):
+            self.events.emit(
+                "dag.run.start",
+                source="dag_runner",
+                issue_id=root_id,
+                payload={"root_id": root_id, "max_steps": max_steps, "review": review},
+            )
 
-            # 1. Collapse review (before termination check)
-            if review and self._has_reviewer():
-                collapsible = self.store.collapsible(root_id)
-                if collapsible:
-                    self._collapse_review(collapsible[0], root_id, step + 1)
-                    continue
+            final: DagResult | None = None
+            try:
+                for step in range(max_steps):
+                    # 0. Unstick: failures / needs_work trigger re-orchestration.
+                    self._maybe_unstick(root_id, step + 1)
 
-            # 2. Check termination
-            v = self.store.validate(root_id)
-            if v.is_final:
-                self.console.print(
-                    f"[green]DAG complete:[/green] {v.reason} ({step} steps)"
-                )
-                return DagResult("root_final", steps=step)
+                    # 1. Collapse review (before termination check)
+                    if review and self._has_reviewer():
+                        collapsible = self.store.collapsible(root_id)
+                        if collapsible:
+                            self._collapse_review(collapsible[0], root_id, step + 1)
+                            continue
 
-            # 3. Select next ready leaf
-            candidates = self.store.ready(root_id, tags=["node:agent"])
-            if not candidates:
-                # If validation says "in progress" but we have no executable
-                # leaves, try an orchestrator repair pass on the root to
-                # resolve deadlocks / bad expansions.
-                self._phase_header(
-                    "Unstick",
-                    subtitle="No executable leaves; invoking orchestrator to repair DAG.",
-                    style="yellow",
-                )
-                root_issue = self.store.get(root_id)
-                if root_issue is None:
-                    return DagResult(
-                        "error", steps=step, error="root vanished"
+                    # 2. Check termination
+                    v = self.store.validate(root_id)
+                    if v.is_final:
+                        self.console.print(
+                            f"[green]DAG complete:[/green] {v.reason} ({step} steps)"
+                        )
+                        final = DagResult("root_final", steps=step)
+                        return final
+
+                    # 3. Select next ready leaf
+                    candidates = self.store.ready(root_id, tags=["node:agent"])
+                    if not candidates:
+                        # If validation says "in progress" but we have no executable
+                        # leaves, try an orchestrator repair pass on the root to
+                        # resolve deadlocks / bad expansions.
+                        self.events.emit(
+                            "dag.unstick.start",
+                            source="dag_runner",
+                            issue_id=root_id,
+                            payload={"root_id": root_id, "step": step + 1},
+                        )
+
+                        self._phase_header(
+                            "Unstick",
+                            subtitle="No executable leaves; invoking orchestrator to repair DAG.",
+                            style="yellow",
+                        )
+                        root_issue = self.store.get(root_id)
+                        if root_issue is None:
+                            final = DagResult(
+                                "error", steps=step, error="root vanished"
+                            )
+                            return final
+
+                        ids_in_scope = set(self.store.subtree_ids(root_id))
+                        open_issues = [
+                            r
+                            for r in self.store.list(status="open")
+                            if r.get("id") in ids_in_scope
+                        ]
+                        diag_lines = [
+                            f"- open_issues: {len(open_issues)}",
+                            "- action: diagnose deadlocks or missing expansions and create executable leaf work",
+                            f"- hint: run `inshallah issues ready --root {root_id}` and `inshallah issues list --root {root_id}`",
+                        ]
+                        diag = "\n".join(diag_lines)
+
+                        repair_issue = dict(root_issue)
+                        repair_issue["title"] = f"Repair stuck DAG: {root_issue['title']}"
+                        repair_issue["body"] = (
+                            (root_issue.get("body") or "")
+                            + "\n\n## Runner Diagnostics\n\n"
+                            + diag
+                        ).strip()
+                        repair_issue["execution_spec"] = None  # force orchestrator.md
+
+                        cli, model, reasoning, prompt_path = self._resolve_config(
+                            repair_issue
+                        )
+                        exit_code, elapsed = self._execute_backend(
+                            repair_issue,
+                            cli,
+                            model,
+                            reasoning,
+                            prompt_path,
+                            root_id,
+                            log_suffix="unstick",
+                        )
+
+                        self.forum.post(
+                            f"issue:{root_id}",
+                            json.dumps(
+                                {
+                                    "step": step + 1,
+                                    "issue_id": root_id,
+                                    "title": root_issue.get("title", ""),
+                                    "exit_code": exit_code,
+                                    "elapsed_s": round(elapsed, 1),
+                                    "type": "unstick",
+                                }
+                            ),
+                            author="orchestrator",
+                        )
+
+                        self.events.emit(
+                            "dag.unstick.end",
+                            source="dag_runner",
+                            issue_id=root_id,
+                            payload={
+                                "root_id": root_id,
+                                "step": step + 1,
+                                "exit_code": exit_code,
+                                "elapsed_s": round(elapsed, 3),
+                            },
+                        )
+                        continue
+
+                    issue = candidates[0]
+                    issue_id = issue["id"]
+                    self._phase_header(
+                        f"Step {step + 1}",
+                        subtitle=f"{issue_id} {issue['title']}",
+                        style="cyan",
                     )
 
-                ids_in_scope = set(self.store.subtree_ids(root_id))
-                open_issues = [
-                    r
-                    for r in self.store.list(status="open")
-                    if r.get("id") in ids_in_scope
-                ]
-                diag_lines = [
-                    f"- open_issues: {len(open_issues)}",
-                    "- action: diagnose deadlocks or missing expansions and create executable leaf work",
-                    f"- hint: run `inshallah issues ready --root {root_id}` and `inshallah issues list --root {root_id}`",
-                ]
-                diag = "\n".join(diag_lines)
+                    self.events.emit(
+                        "dag.step.start",
+                        source="dag_runner",
+                        issue_id=issue_id,
+                        payload={"root_id": root_id, "step": step + 1, "title": issue.get("title", "")},
+                    )
 
-                repair_issue = dict(root_issue)
-                repair_issue["title"] = f"Repair stuck DAG: {root_issue['title']}"
-                repair_issue["body"] = (
-                    (root_issue.get("body") or "")
-                    + "\n\n## Runner Diagnostics\n\n"
-                    + diag
-                ).strip()
-                repair_issue["execution_spec"] = None  # force orchestrator.md
+                    # 3. Claim
+                    self.events.emit(
+                        "dag.claim",
+                        source="dag_runner",
+                        issue_id=issue_id,
+                        payload={"root_id": root_id, "step": step + 1},
+                    )
+                    self.store.claim(issue_id)
 
-                cli, model, reasoning, prompt_path = self._resolve_config(
-                    repair_issue
-                )
-                exit_code, elapsed = self._execute_backend(
-                    repair_issue,
-                    cli,
-                    model,
-                    reasoning,
-                    prompt_path,
-                    root_id,
-                    log_suffix="unstick",
-                )
+                    # 4. Route + 5. Render + 6. Execute
+                    cli, model, reasoning, prompt_path = self._resolve_config(issue)
+                    exit_code, elapsed = self._execute_backend(
+                        issue, cli, model, reasoning, prompt_path, root_id
+                    )
 
-                self.forum.post(
-                    f"issue:{root_id}",
-                    json.dumps(
-                        {
+                    # 7. Check postconditions
+                    updated = self.store.get(issue_id)
+                    if updated is None:
+                        final = DagResult("error", steps=step + 1, error="issue vanished")
+                        return final
+
+                    if updated["status"] != "closed":
+                        self.console.print(
+                            f"  [yellow]Issue not closed after execution "
+                            f"(status={updated['status']})[/yellow]"
+                        )
+                        # Agent didn't close the issue — treat as failure and
+                        # re-orchestrate so we don't get stuck with in_progress work.
+                        updated = self.store.close(issue_id, outcome="failure")
+                        self.console.print("  [red]Marked as failure[/red]")
+
+                    # 7b. Review phase
+                    if review and updated["status"] == "closed":
+                        updated = self._maybe_review(
+                            updated, root_id, step + 1
+                        )
+
+                    # 8. Log to forum
+                    self.forum.post(
+                        f"issue:{issue_id}",
+                        json.dumps(
+                            {
+                                "step": step + 1,
+                                "issue_id": issue_id,
+                                "title": issue["title"],
+                                "exit_code": exit_code,
+                                "outcome": updated.get("outcome"),
+                                "elapsed_s": round(elapsed, 1),
+                            }
+                        ),
+                        author="orchestrator",
+                    )
+
+                    self.events.emit(
+                        "dag.step.end",
+                        source="dag_runner",
+                        issue_id=issue_id,
+                        payload={
+                            "root_id": root_id,
                             "step": step + 1,
-                            "issue_id": root_id,
-                            "title": root_issue.get("title", ""),
                             "exit_code": exit_code,
-                            "elapsed_s": round(elapsed, 1),
-                            "type": "unstick",
-                        }
-                    ),
-                    author="orchestrator",
-                )
-                continue
+                            "elapsed_s": round(elapsed, 3),
+                            "outcome": updated.get("outcome"),
+                        },
+                    )
 
-            issue = candidates[0]
-            issue_id = issue["id"]
-            self._phase_header(
-                f"Step {step + 1}",
-                subtitle=f"{issue_id} {issue['title']}",
-                style="cyan",
-            )
+                    # 9. Re-orchestrate on failure / needs_work
+                    if updated.get("outcome") in self._REORCHESTRATE_OUTCOMES:
+                        self.console.print(
+                            f"  [yellow]Outcome={updated.get('outcome')} — "
+                            f"re-invoking orchestrator on {issue_id}[/yellow]"
+                        )
+                        self._reopen_for_orchestration(
+                            issue_id,
+                            reason=f"outcome={updated.get('outcome')}",
+                            step=step + 1,
+                        )
 
-            # 3. Claim
-            self.store.claim(issue_id)
-
-            # 4. Route + 5. Render + 6. Execute
-            cli, model, reasoning, prompt_path = self._resolve_config(issue)
-            exit_code, elapsed = self._execute_backend(
-                issue, cli, model, reasoning, prompt_path, root_id
-            )
-
-            # 7. Check postconditions
-            updated = self.store.get(issue_id)
-            if updated is None:
-                return DagResult("error", steps=step + 1, error="issue vanished")
-
-            if updated["status"] != "closed":
                 self.console.print(
-                    f"  [yellow]Issue not closed after execution "
-                    f"(status={updated['status']})[/yellow]"
+                    f"[yellow]Max steps exhausted ({max_steps})[/yellow]"
                 )
-                # Agent didn't close the issue — treat as failure and
-                # re-orchestrate so we don't get stuck with in_progress work.
-                updated = self.store.close(issue_id, outcome="failure")
-                self.console.print("  [red]Marked as failure[/red]")
-
-            # 7b. Review phase
-            if review and updated["status"] == "closed":
-                updated = self._maybe_review(
-                    updated, root_id, step + 1
-                )
-
-            # 8. Log to forum
-            self.forum.post(
-                f"issue:{issue_id}",
-                json.dumps(
-                    {
-                        "step": step + 1,
-                        "issue_id": issue_id,
-                        "title": issue["title"],
-                        "exit_code": exit_code,
-                        "outcome": updated.get("outcome"),
-                        "elapsed_s": round(elapsed, 1),
-                    }
-                ),
-                author="orchestrator",
-            )
-
-            # 9. Re-orchestrate on failure / needs_work
-            if updated.get("outcome") in self._REORCHESTRATE_OUTCOMES:
-                self.console.print(
-                    f"  [yellow]Outcome={updated.get('outcome')} — "
-                    f"re-invoking orchestrator on {issue_id}[/yellow]"
-                )
-                self._reopen_for_orchestration(
-                    issue_id,
-                    reason=f"outcome={updated.get('outcome')}",
-                    step=step + 1,
-                )
-
-        self.console.print(
-            f"[yellow]Max steps exhausted ({max_steps})[/yellow]"
-        )
-        return DagResult("max_steps_exhausted", steps=max_steps)
+                final = DagResult("max_steps_exhausted", steps=max_steps)
+                return final
+            finally:
+                if final is not None:
+                    self.events.emit(
+                        "dag.run.end",
+                        source="dag_runner",
+                        issue_id=root_id,
+                        payload={
+                            "root_id": root_id,
+                            "status": final.status,
+                            "steps": final.steps,
+                            "error": final.error,
+                        },
+                    )

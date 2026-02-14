@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .events import EventLog
 from .jsonl import now_ts, read_jsonl, short_id, write_jsonl
 
 
@@ -21,6 +22,7 @@ class IssueStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self.events = EventLog(path.parent / "events.jsonl")
 
     @classmethod
     def from_workdir(cls, root: Path | None = None) -> IssueStore:
@@ -65,6 +67,12 @@ class IssueStore:
         rows = self._load()
         rows.append(issue)
         self._save(rows)
+        self.events.emit(
+            "issue.create",
+            source="issue_store",
+            issue_id=issue["id"],
+            payload={"issue": issue},
+        )
         return issue
 
     def get(self, issue_id: str) -> dict | None:
@@ -88,22 +96,86 @@ class IssueStore:
         issue = self._find(rows, issue_id)
         if issue is None:
             raise KeyError(issue_id)
+        before = dict(issue)
         for key, value in fields.items():
             if key == "id":
                 continue
             issue[key] = value
         issue["updated_at"] = now_ts()
         self._save(rows)
+        after = dict(issue)
+
+        changed: dict[str, dict[str, Any]] = {}
+        for key, value in fields.items():
+            if key == "id":
+                continue
+            if before.get(key) != after.get(key):
+                changed[key] = {"from": before.get(key), "to": after.get(key)}
+
+        self.events.emit(
+            "issue.update",
+            source="issue_store",
+            issue_id=issue_id,
+            payload={"changed": changed, "fields": {k: v for k, v in fields.items() if k != "id"}},
+        )
+
+        if before.get("status") != after.get("status"):
+            status = after.get("status")
+            if status == "open":
+                self.events.emit(
+                    "issue.open",
+                    source="issue_store",
+                    issue_id=issue_id,
+                    payload={"from": before.get("status"), "to": status},
+                )
+            elif status == "closed":
+                self.events.emit(
+                    "issue.close",
+                    source="issue_store",
+                    issue_id=issue_id,
+                    payload={
+                        "from": before.get("status"),
+                        "to": status,
+                        "outcome": after.get("outcome"),
+                    },
+                )
+            elif status == "in_progress":
+                self.events.emit(
+                    "issue.claim",
+                    source="issue_store",
+                    issue_id=issue_id,
+                    payload={"from": before.get("status"), "to": status, "ok": True},
+                )
         return issue
 
     def claim(self, issue_id: str) -> bool:
         rows = self._load()
         issue = self._find(rows, issue_id)
-        if issue is None or issue["status"] != "open":
+        if issue is None:
+            self.events.emit(
+                "issue.claim",
+                source="issue_store",
+                issue_id=issue_id,
+                payload={"ok": False, "reason": "not_found"},
+            )
+            return False
+        if issue["status"] != "open":
+            self.events.emit(
+                "issue.claim",
+                source="issue_store",
+                issue_id=issue_id,
+                payload={"ok": False, "reason": f"status={issue['status']}"},
+            )
             return False
         issue["status"] = "in_progress"
         issue["updated_at"] = now_ts()
         self._save(rows)
+        self.events.emit(
+            "issue.claim",
+            source="issue_store",
+            issue_id=issue_id,
+            payload={"ok": True},
+        )
         return True
 
     def close(self, issue_id: str, outcome: str = "success") -> dict:
@@ -133,6 +205,12 @@ class IssueStore:
             issue["deps"].append(dep)
             issue["updated_at"] = now_ts()
             self._save(rows)
+            self.events.emit(
+                "issue.dep.add",
+                source="issue_store",
+                issue_id=src_id,
+                payload={"type": dep_type, "target": dst_id},
+            )
 
     def remove_dep(self, src_id: str, dep_type: str, dst_id: str) -> bool:
         """Remove one dependency edge. Returns True if an edge was removed."""
@@ -150,6 +228,12 @@ class IssueStore:
         if changed:
             issue["updated_at"] = now_ts()
             self._save(rows)
+        self.events.emit(
+            "issue.dep.remove",
+            source="issue_store",
+            issue_id=src_id,
+            payload={"type": dep_type, "target": dst_id, "ok": changed},
+        )
         return changed
 
     def children(self, parent_id: str) -> list[dict]:

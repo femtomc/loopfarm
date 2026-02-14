@@ -1,0 +1,13 @@
+{
+  "name": "@inshallah/monitor",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/server.ts",
+    "start": "bun src/server.ts",
+    "test": "bun test",
+    "build": "bun build src/server.ts --outdir dist --target bun"
+  }
+}
+

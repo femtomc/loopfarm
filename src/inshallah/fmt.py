@@ -593,6 +593,16 @@ class CodexFormatter(_BaseFormatter):
                         self._print_prompt(content)
                     else:
                         self._accumulate(content)
+            elif item_type == "file_change":
+                changes = item.get("changes", [])
+                if isinstance(changes, list):
+                    for change in changes:
+                        if not isinstance(change, dict):
+                            continue
+                        path = change.get("path", "")
+                        kind = change.get("kind", "update")
+                        canonical = "write" if kind == "create" else "edit"
+                        self._tool(canonical, path, ok=True)
             elif item_type == "usage":
                 usage = item.get("usage")
                 if isinstance(usage, dict):

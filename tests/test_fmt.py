@@ -332,6 +332,83 @@ def test_codex_user_prompt_is_shown() -> None:
     assert "prompt: Please fix the parser." in rendered
 
 
+def test_codex_file_change_update_shows_edit() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = CodexFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_14",
+                "type": "file_change",
+                "changes": [
+                    {"path": "/home/user/project/src/main.zig", "kind": "update"},
+                ],
+                "status": "completed",
+            },
+        },
+    )
+
+    rendered = out.getvalue()
+    assert "\u2713" in rendered
+    assert "edit" in rendered
+    assert "/home/user/project/src/main.zig" in rendered
+
+
+def test_codex_file_change_create_shows_write() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = CodexFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_20",
+                "type": "file_change",
+                "changes": [
+                    {"path": "/home/user/project/src/new_file.zig", "kind": "create"},
+                ],
+                "status": "completed",
+            },
+        },
+    )
+
+    rendered = out.getvalue()
+    assert "\u2713" in rendered
+    assert "write" in rendered
+    assert "/home/user/project/src/new_file.zig" in rendered
+
+
+def test_codex_file_change_multiple_changes() -> None:
+    console, out = _console(force_terminal=False)
+    fmt = CodexFormatter(console)
+
+    _emit(
+        fmt,
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_30",
+                "type": "file_change",
+                "changes": [
+                    {"path": "/home/user/project/a.zig", "kind": "update"},
+                    {"path": "/home/user/project/b.zig", "kind": "create"},
+                ],
+                "status": "completed",
+            },
+        },
+    )
+
+    rendered = out.getvalue()
+    assert "edit" in rendered
+    assert "a.zig" in rendered
+    assert "write" in rendered
+    assert "b.zig" in rendered
+
+
 # -- OpenCode --
 
 

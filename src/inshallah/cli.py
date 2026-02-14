@@ -171,10 +171,11 @@ def cmd_init(console: Console) -> int:
             "{{ROLES}}\n\n"
             "## Responsibilities\n\n"
             "1. Decide whether the selected issue is atomic.\n"
-            "2. If not atomic, decompose into child issues with `outcome=expanded`.\n"
-            "3. Assign a role to each child via `execution_spec.role`.\n"
-            "4. Use `blocks` dependencies for sequential ordering.\n"
-            "5. Keep decomposition deterministic and minimal.\n\n"
+            "2. If the issue previously failed or was marked `needs_work`, read the forum topic (`issue:<id>`) for context and create remediation children.\n"
+            "3. If not atomic, decompose into child issues with `outcome=expanded`.\n"
+            "4. Assign a role to each child via `execution_spec.role`.\n"
+            "5. Use `blocks` dependencies for sequential ordering.\n"
+            "6. Keep decomposition deterministic and minimal.\n\n"
             "## CLI Quick Reference\n\n"
             "```bash\n"
             "# Inspect graph state\n"
@@ -226,7 +227,7 @@ def cmd_init(console: Console) -> int:
     if not reviewer.exists():
         reviewer.write_text(
             "---\n"
-            "description: Independently verify completed work and either approve or decompose into targeted refinements.\n"
+            "description: Independently verify completed work and either approve or mark the issue as needs_work.\n"
             "cli: codex\n"
             "model: gpt-5.3-codex\n"
             "reasoning: xhigh\n"
@@ -243,15 +244,15 @@ def cmd_init(console: Console) -> int:
             "### If the work is correct and complete:\n"
             "Do nothing. The issue stays closed with outcome=success.\n\n"
             "### If the work needs targeted fixes:\n"
-            "1. Change the outcome:\n"
-            "   `inshallah issues update {{ISSUE_ID}} --outcome expanded`\n"
-            "2. Create specific child issues for each fix:\n"
-            "   `inshallah issues create \"Fix: <problem>\" --body \"<details>\" --parent {{ISSUE_ID}} --role worker`\n\n"
+            "1. Post a concrete explanation of what's wrong and what must change:\n"
+            "   `inshallah forum post issue:{{ISSUE_ID}} -m \"<what failed + acceptance criteria>\" --author reviewer`\n"
+            "2. Mark the issue as needing work:\n"
+            "   `inshallah issues update {{ISSUE_ID}} --outcome needs_work`\n\n"
+            "The orchestrator will re-expand the issue into remediation children.\n\n"
             "## Rules\n\n"
-            "- Only change outcome to `expanded` if there are real functional issues.\n"
-            "- Each child issue must be atomic and actionable.\n"
             "- DO NOT create children for style nitpicks.\n"
             "- DO NOT modify code yourself. Evaluation only.\n"
+            "- DO NOT create new issues. Mark needs_work and explain why.\n"
         )
 
     (lf / "logs").mkdir(exist_ok=True)
@@ -1194,7 +1195,7 @@ def _issues_cmd_close(argv: list[str], pretty: bool, console: Console) -> int:
             usage="inshallah issues close <id-or-prefix> [--outcome OUTCOME] [--pretty]",
             about="Close an issue.",
             options=[
-                ("--outcome", "success | failure | skipped | expanded (default: success)"),
+                ("--outcome", "success | failure | needs_work | skipped | expanded (default: success)"),
                 ("--pretty", "Indent JSON output"),
             ],
             examples=["inshallah issues close inshallah-ab12 --outcome expanded"],
@@ -1636,7 +1637,7 @@ _GUIDE_CONCEPTS: list[tuple[str, str, str]] = [
     ),
     (
         "outcomes",
-        "`success`, `failure`, `skipped`, `expanded` (decomposed into child work).",
+        "`success`, `failure`, `needs_work`, `skipped`, `expanded` (decomposed into child work).",
         "inshallah issues close <id> --outcome expanded.",
     ),
 ]
@@ -1681,7 +1682,7 @@ _GUIDE_WORKFLOW: list[tuple[str, str, str]] = [
     (
         "Review pass (optional role)",
         "inshallah forum read issue:<issue-id> --limit 50",
-        "Reviewer activity is logged in the issue topic; reviewer can keep success or expand for targeted fixes.",
+        "Reviewer activity is logged in the issue topic; reviewer can keep success or mark needs_work so the orchestrator expands targeted fixes.",
     ),
     (
         "Validate DAG completion",

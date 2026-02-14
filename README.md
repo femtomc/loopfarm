@@ -58,3 +58,66 @@ This package is based on a few simple premises:
 * Someone should wrap a bow on this, make it programmable in a straightforward way, with a good UI ("finding 3 patterns in 2 files" you won't find dipshit decisions like this in our UI)
 
 Here's a package which is intended to be _as minimal as possible_ towards this goal. A "pi-like" Gas Town, if you will.
+
+### The orchestrator loop
+
+The orchestrator is a `select → execute → validate` loop. On each step:
+
+1. **Select** a ready leaf from the issue DAG (open, unblocked, no open children, sorted by priority).
+2. Route it through execution configuration resolution (more on this below) to determine which CLI backend to use, which model, and which prompt template.
+3. **Execute** by spawning a subprocess (Claude, Codex, Gemini, etc.) with the rendered prompt. The agent runs, does its work, and closes the issue via the `inshallah` CLI.
+4. **Validate** whether the DAG is done. Failures and review rejections do **not** halt the run: they are logged to the forum and the orchestrator is re-invoked to expand the issue into remediation children. If everything collapses back to the root with `success`: done. Otherwise: loop.
+
+There's an optional **review phase** after each successful execution: a reviewer agent independently evaluates the work and either passes it or marks it `needs_work`. The reviewer does not create new issues. There's also a **collapse review** phase that fires when all children of an expanded node finish — an aggregate check that the parts actually satisfy the whole; if it fails, the reviewer marks `needs_work` and the orchestrator expands follow-up remediation work.
+
+The loop terminates when the DAG reaches a final state (collapse all the way back to the root), or when it hits the step limit. The runner should not reach "no executable leaves"; if it does, it re-invokes the orchestrator to repair/expand the DAG. On resume (`inshallah resume <root-id>`), any in-progress issues are reset to open and the loop picks up where it left off.
+
+### Programmability: roles and execution configuration
+
+Roles are markdown files in `.inshallah/roles/` with YAML frontmatter. `inshallah init` scaffolds three:
+
+- **orchestrator** — decomposes root goals into child issues, assigns roles, manages dependency order. This is the planner.
+- **worker** — executes exactly one atomic issue end-to-end (code, tests, docs, whatever), then closes it with a terminal outcome.
+- **reviewer** — independently verifies completed work. If the work is good, it does nothing. If there are real functional issues, it marks the issue `needs_work` and explains why; the orchestrator expands remediation children.
+
+Each role specifies its own `cli`, `model`, and `reasoning` level in its frontmatter. You can create as many roles as you want — a `researcher` that uses Claude Opus for deep analysis, a `scripter` that uses a fast model for boilerplate, whatever.
+
+Execution configuration resolution is 3-tiered, each layer overriding the last:
+
+1. **`orchestrator.md` frontmatter** — global defaults for every issue.
+2. **Role frontmatter** — role-specific overrides (e.g., the reviewer uses a different model than the worker).
+3. **`execution_spec` on the issue itself** — per-issue explicit overrides. The orchestrator agent sets these when it decomposes work.
+
+Roles are also self-documenting: the orchestrator agent sees `{{ROLES}}` in its prompt, which auto-expands to a catalog of all available roles with their descriptions. So when the orchestrator decides which role to assign to a child issue, it has the full menu in front of it.
+
+### The DAG: expansion and contraction
+
+The issue DAG has two edge types:
+
+- **`parent`** — hierarchical decomposition. "This issue is a child of that issue."
+- **`blocks`** — execution ordering. "This issue must close before that issue can start."
+
+**Expansion** is how the DAG grows. When the orchestrator selects an issue and decides it isn't atomic, it:
+
+1. Creates child issues under the parent, each with a role and priority.
+2. Adds `blocks` edges between children that need to run sequentially.
+3. Closes the parent with `outcome=expanded`.
+
+The `expanded` outcome is special: it means "I'm done as a planning node, my real work lives in my children." Expanded nodes are **transparent** for completion checks — the DAG doesn't consider them pending work. They're delegation markers.
+
+**Contraction** is how the DAG resolves. As workers close leaf issues with outcomes (`success`, `skipped`) or signal `failure`, the set of ready leaves shifts. Blocking edges dissolve as their prerequisites close. When an issue fails (or is marked `needs_work`), the orchestrator expands it into smaller remediation leaves and the loop continues.
+
+When all children of an expanded node reach successful terminal outcomes, the node becomes **collapsible**. If a reviewer is configured, a collapse review fires: the reviewer checks whether the aggregate children actually satisfy the parent's original specification. If so, the parent is promoted to `success`. If not, the reviewer marks `needs_work` and the orchestrator creates new remediation children — the DAG re-expands locally.
+
+This is the breathing pattern: the DAG expands when planning decomposes goals, and contracts when execution closes leaves. Failures and `needs_work` are not halts; they are triggers for re-expansion. The whole thing converges when everything collapses back to the root with `success`.
+
+```
+          root (expanded)
+         /    \
+     auth      crud (blocked by auth)
+    /    \
+ schema  jwt
+   ✓      ✗ → re-orchestrate
+```
+
+The DAG is stored as flat JSONL. No external database, no migration headaches. Issues are human-readable, greppable, and durable across sessions. The forum (also JSONL) stores coordination messages between agents — execution logs, review outcomes, status updates — providing a persistent audit trail.

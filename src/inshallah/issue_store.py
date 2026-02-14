@@ -240,7 +240,7 @@ class IssueStore:
         - Its status is ``closed`` with outcome ``expanded``
         - It has at least one child
         - Every direct child is ``closed`` with a terminal outcome
-          (``success``, ``failure``, or ``skipped`` — NOT ``expanded``)
+          (``success`` or ``skipped`` — NOT ``expanded``)
 
         Bottom-up ordering is enforced by the terminal-children constraint:
         a parent can't be collapsible while any child is still expanded.
@@ -256,7 +256,9 @@ class IssueStore:
                 if dep["type"] == "parent":
                     children_of.setdefault(dep["target"], []).append(row)
 
-        terminal_outcomes = {"success", "failure", "skipped"}
+        # Collapse is only valid when children "passed" the work. Failures and
+        # needs_work are handled by re-orchestration, not collapse.
+        terminal_outcomes = {"success", "skipped"}
         result: list[dict] = []
 
         for issue_id in ids_in_scope:
@@ -285,10 +287,12 @@ class IssueStore:
           (decomposition), but its logical completion flows through to its
           descendants.  Expanded nodes are transparent when determining
           whether work remains.
-        - All other closed outcomes (``success``, ``failure``, ``skipped``)
-          are *terminal*: the work at that node is done.
-        - The DAG is final when every non-expanded node in the subtree is
-          terminally closed (or a failure is detected anywhere).
+        - ``failure`` and ``needs_work`` are *not* final: they signal that the
+          orchestrator should re-expand the issue with remediation children.
+        - All other closed outcomes (for example ``success`` and ``skipped``)
+          are terminal.
+        - The DAG is final when there is no remaining open/in_progress work,
+          and no node is awaiting re-orchestration.
         """
         rows = self._load()
         by_id = {row["id"]: row for row in rows}
@@ -298,15 +302,45 @@ class IssueStore:
         if root is None:
             return ValidationResult(is_final=True, reason="root not found")
 
-        # Failures anywhere in the subtree are an immediate hard stop.
-        failed = [
-            issue_id
-            for issue_id in ids
-            if by_id.get(issue_id, {}).get("outcome") == "failure"
-        ]
-        if failed:
+        # Build parent→children mapping so we can detect invalid "expanded"
+        # nodes that have no child work.
+        children_of: dict[str, list[str]] = {}
+        for row in rows:
+            for dep in row.get("deps", []):
+                if dep["type"] == "parent":
+                    children_of.setdefault(dep["target"], []).append(row["id"])
+
+        # Closed failures / needs_work are not final: they require the
+        # orchestrator to re-expand and create new leaf work.
+        needs_reorch = sorted(
+            [
+                issue_id
+                for issue_id in ids
+                if by_id.get(issue_id, {}).get("status") == "closed"
+                and by_id.get(issue_id, {}).get("outcome")
+                in {"failure", "needs_work"}
+            ]
+        )
+        if needs_reorch:
             return ValidationResult(
-                is_final=True, reason=f"failures: {','.join(failed)}"
+                is_final=False, reason=f"needs work: {','.join(needs_reorch)}"
+            )
+
+        # "expanded" without children is a structural bug: there is no leaf
+        # work remaining, but the DAG can't converge without re-orchestration.
+        bad_expanded = sorted(
+            [
+                issue_id
+                for issue_id in ids
+                if by_id.get(issue_id, {}).get("status") == "closed"
+                and by_id.get(issue_id, {}).get("outcome") == "expanded"
+                and not children_of.get(issue_id)
+            ]
+        )
+        if bad_expanded:
+            return ValidationResult(
+                is_final=False,
+                reason=f"expanded without children: {','.join(bad_expanded)}",
             )
 
         # Collect issues that still need work.  Expanded nodes are

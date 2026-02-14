@@ -46,6 +46,8 @@ class DagRunner:
         self.repo_root = repo_root
         self.console = console or Console()
 
+    _REORCHESTRATE_OUTCOMES = {"failure", "needs_work"}
+
     def _rich_output(self) -> bool:
         return bool(self.console.is_terminal and not self.console.is_dumb_terminal)
 
@@ -241,6 +243,85 @@ class DagRunner:
         # Re-read in case reviewer changed outcome / created children
         return self.store.get(issue_id) or issue
 
+    def _reopen_for_orchestration(
+        self, issue_id: str, *, reason: str, step: int
+    ) -> None:
+        """Reopen an issue and clear execution routing so orchestrator.md runs next."""
+        reopened = self.store.update(
+            issue_id, status="open", outcome=None, execution_spec=None
+        )
+
+        # Log to forum so the orchestrator can pick up failure / review context.
+        self.forum.post(
+            f"issue:{issue_id}",
+            json.dumps(
+                {
+                    "step": step,
+                    "issue_id": issue_id,
+                    "title": reopened.get("title", ""),
+                    "type": "reorchestrate",
+                    "reason": reason,
+                }
+            ),
+            author="orchestrator",
+        )
+
+    def _maybe_unstick(self, root_id: str, step: int) -> bool:
+        """If the DAG has closed nodes requiring re-orchestration, reopen one."""
+        ids_in_scope = set(self.store.subtree_ids(root_id))
+        rows = self.store.list()
+
+        # Build children mapping once (avoid N calls to children()).
+        children_of: dict[str, list[dict]] = {}
+        for row in rows:
+            for dep in row.get("deps", []):
+                if dep.get("type") == "parent":
+                    children_of.setdefault(dep.get("target", ""), []).append(row)
+
+        def _has_open_children(issue_id: str) -> bool:
+            return any(
+                child.get("status") != "closed"
+                for child in children_of.get(issue_id, [])
+            )
+
+        candidates: list[dict] = []
+        for row in rows:
+            issue_id = row.get("id")
+            if not issue_id or issue_id not in ids_in_scope:
+                continue
+            if row.get("status") != "closed":
+                continue
+
+            outcome = row.get("outcome")
+            if outcome in self._REORCHESTRATE_OUTCOMES:
+                # Only reopen when it would become a leaf (otherwise, there's
+                # already open descendant work to execute).
+                if _has_open_children(issue_id):
+                    continue
+                candidates.append(row)
+                continue
+
+            # "expanded" without children is a broken state: there is no leaf
+            # work remaining, so the only way forward is re-orchestration.
+            if outcome == "expanded" and not children_of.get(issue_id):
+                candidates.append(row)
+
+        if not candidates:
+            return False
+
+        candidates.sort(key=lambda r: r.get("priority", 3))
+        target = candidates[0]
+        target_id = target["id"]
+        target_outcome = target.get("outcome")
+        self.console.print(
+            f"[yellow]Reopening {target_id} for orchestration "
+            f"(was outcome={target_outcome}).[/yellow]"
+        )
+        self._reopen_for_orchestration(
+            target_id, reason=f"was outcome={target_outcome}", step=step
+        )
+        return True
+
     # ------------------------------------------------------------------
     # Collapse review helpers
     # ------------------------------------------------------------------
@@ -279,9 +360,11 @@ class DagRunner:
             f"All children of this issue have completed. Review whether their "
             f"aggregate work satisfies the original specification above.\n\n"
             f"If satisfied: no action needed (the issue will be marked successful).\n\n"
-            f"If NOT satisfied: create new child issues under {issue_id} to "
-            f"address the gaps. Use `inshallah close {issue_id} --outcome expanded` "
-            f"is already set — just create the missing children.\n"
+            f"If NOT satisfied: mark the parent as needing work by running:\n\n"
+            f"  `inshallah issues update {issue_id} --outcome needs_work`\n\n"
+            f"Then explain the gaps in the forum topic (issue:{issue_id}).\n\n"
+            f"Do NOT create child issues yourself; the orchestrator will "
+            f"re-expand the issue into remediation children.\n"
         )
 
         # Route through reviewer role (cli/model/reasoning from reviewer.md)
@@ -322,17 +405,36 @@ class DagRunner:
         # Check: did the reviewer create new children?
         new_kids = self.store.children(issue_id)
         open_kids = [k for k in new_kids if k["status"] != "closed"]
-        if not open_kids:
-            # All satisfied — promote to success
-            self.store.update(issue_id, outcome="success")
+        updated = self.store.get(issue_id) or issue
+
+        # Contract: reviewer marks needs_work; orchestrator expands. We still
+        # tolerate legacy behavior (reviewer directly creates remediation
+        # children).
+        if updated.get("status") != "closed":
             self.console.print(
-                f"  [green]Collapse review passed — {issue_id} → success[/green]"
+                f"  [yellow]Collapse review left issue open — {issue_id} "
+                f"will be handled by the main loop[/yellow]"
             )
-        else:
+            return
+        if updated.get("outcome") in self._REORCHESTRATE_OUTCOMES:
+            self.console.print(
+                f"  [yellow]Collapse review marked needs_work — {issue_id} "
+                f"will be re-orchestrated[/yellow]"
+            )
+            return
+
+        if open_kids:
             self.console.print(
                 f"  [yellow]Collapse review created {len(open_kids)} "
                 f"remediation issue(s) — loop continues[/yellow]"
             )
+            return
+
+        # All satisfied — promote to success
+        self.store.update(issue_id, outcome="success")
+        self.console.print(
+            f"  [green]Collapse review passed — {issue_id} → success[/green]"
+        )
 
     # ------------------------------------------------------------------
     # Main loop
@@ -342,6 +444,9 @@ class DagRunner:
         self, root_id: str, max_steps: int = 20, *, review: bool = True
     ) -> DagResult:
         for step in range(max_steps):
+            # 0. Unstick: failures / needs_work trigger re-orchestration.
+            self._maybe_unstick(root_id, step + 1)
+
             # 1. Collapse review (before termination check)
             if review and self._has_reviewer():
                 collapsible = self.store.collapsible(root_id)
@@ -360,10 +465,70 @@ class DagRunner:
             # 3. Select next ready leaf
             candidates = self.store.ready(root_id, tags=["node:agent"])
             if not candidates:
-                self.console.print(
-                    "[yellow]No executable leaf found.[/yellow]"
+                # If validation says "in progress" but we have no executable
+                # leaves, try an orchestrator repair pass on the root to
+                # resolve deadlocks / bad expansions.
+                self._phase_header(
+                    "Unstick",
+                    subtitle="No executable leaves; invoking orchestrator to repair DAG.",
+                    style="yellow",
                 )
-                return DagResult("no_executable_leaf", steps=step)
+                root_issue = self.store.get(root_id)
+                if root_issue is None:
+                    return DagResult(
+                        "error", steps=step, error="root vanished"
+                    )
+
+                ids_in_scope = set(self.store.subtree_ids(root_id))
+                open_issues = [
+                    r
+                    for r in self.store.list(status="open")
+                    if r.get("id") in ids_in_scope
+                ]
+                diag_lines = [
+                    f"- open_issues: {len(open_issues)}",
+                    "- action: diagnose deadlocks or missing expansions and create executable leaf work",
+                    f"- hint: run `inshallah issues ready --root {root_id}` and `inshallah issues list --root {root_id}`",
+                ]
+                diag = "\n".join(diag_lines)
+
+                repair_issue = dict(root_issue)
+                repair_issue["title"] = f"Repair stuck DAG: {root_issue['title']}"
+                repair_issue["body"] = (
+                    (root_issue.get("body") or "")
+                    + "\n\n## Runner Diagnostics\n\n"
+                    + diag
+                ).strip()
+                repair_issue["execution_spec"] = None  # force orchestrator.md
+
+                cli, model, reasoning, prompt_path = self._resolve_config(
+                    repair_issue
+                )
+                exit_code, elapsed = self._execute_backend(
+                    repair_issue,
+                    cli,
+                    model,
+                    reasoning,
+                    prompt_path,
+                    root_id,
+                    log_suffix="unstick",
+                )
+
+                self.forum.post(
+                    f"issue:{root_id}",
+                    json.dumps(
+                        {
+                            "step": step + 1,
+                            "issue_id": root_id,
+                            "title": root_issue.get("title", ""),
+                            "exit_code": exit_code,
+                            "elapsed_s": round(elapsed, 1),
+                            "type": "unstick",
+                        }
+                    ),
+                    author="orchestrator",
+                )
+                continue
 
             issue = candidates[0]
             issue_id = issue["id"]
@@ -392,10 +557,10 @@ class DagRunner:
                     f"  [yellow]Issue not closed after execution "
                     f"(status={updated['status']})[/yellow]"
                 )
-                # Agent didn't close the issue — mark failure
-                if exit_code != 0:
-                    updated = self.store.close(issue_id, outcome="failure")
-                    self.console.print("  [red]Marked as failure[/red]")
+                # Agent didn't close the issue — treat as failure and
+                # re-orchestrate so we don't get stuck with in_progress work.
+                updated = self.store.close(issue_id, outcome="failure")
+                self.console.print("  [red]Marked as failure[/red]")
 
             # 7b. Review phase
             if review and updated["status"] == "closed":
@@ -418,6 +583,18 @@ class DagRunner:
                 ),
                 author="orchestrator",
             )
+
+            # 9. Re-orchestrate on failure / needs_work
+            if updated.get("outcome") in self._REORCHESTRATE_OUTCOMES:
+                self.console.print(
+                    f"  [yellow]Outcome={updated.get('outcome')} — "
+                    f"re-invoking orchestrator on {issue_id}[/yellow]"
+                )
+                self._reopen_for_orchestration(
+                    issue_id,
+                    reason=f"outcome={updated.get('outcome')}",
+                    step=step + 1,
+                )
 
         self.console.print(
             f"[yellow]Max steps exhausted ({max_steps})[/yellow]"

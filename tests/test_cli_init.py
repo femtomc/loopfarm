@@ -27,5 +27,5 @@ def test_init_writes_prompt_descriptions(tmp_path: Path) -> None:
     assert "description: Best for concrete execution tasks; implement exactly one atomic issue (code/tests/docs), verify results, then close with a terminal outcome." in worker
 
     reviewer = (tmp_path / ".inshallah" / "roles" / "reviewer.md").read_text()
-    assert "description: Independently verify completed work and either approve or decompose into targeted refinements." in reviewer
+    assert "description: Independently verify completed work and either approve or mark the issue as needs_work." in reviewer
     assert "{{ISSUE_ID}}" in reviewer

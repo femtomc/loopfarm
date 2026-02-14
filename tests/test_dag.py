@@ -242,7 +242,7 @@ class TestThreeTierResolution:
 
 
 class TestReviewPhase:
-    """Test the review-triggered decomposition feature."""
+    """Test the review-triggered re-orchestration feature."""
 
     def _run_with_side_effect(
         self,
@@ -250,7 +250,7 @@ class TestReviewPhase:
         *,
         has_reviewer: bool = False,
         worker_outcome: str = "success",
-        reviewer_changes_outcome: bool = False,
+        reviewer_marks_needs_work: bool = False,
         review: bool = True,
         execution_spec: dict | None = None,
     ) -> tuple[DagRunner, IssueStore, ForumStore, dict, MagicMock]:
@@ -283,14 +283,10 @@ class TestReviewPhase:
             if call_count[0] == 1:
                 # Worker closes the issue
                 store.close(issue_id, outcome=worker_outcome)
-            elif call_count[0] == 2 and reviewer_changes_outcome:
-                # Reviewer changes outcome to expanded and creates a child
-                store.update(issue_id, outcome="expanded")
-                child = store.create(
-                    "Fix: something",
-                    tags=["node:agent"],
-                )
-                store.add_dep(child["id"], "parent", issue_id)
+            elif call_count[0] == 2 and reviewer_marks_needs_work:
+                # Reviewer rejects work; orchestrator is responsible for
+                # expanding remediation children.
+                store.update(issue_id, outcome="needs_work")
             return 0
 
         with patch("inshallah.dag.get_backend") as mock_backend, \
@@ -342,21 +338,21 @@ class TestReviewPhase:
         )
         assert mock_proc.run.call_count == 1
 
-    def test_reviewer_creates_children(self, tmp_path: Path) -> None:
-        """Reviewer changes outcome to expanded + creates children → DAG continues."""
+    def test_reviewer_marks_needs_work(self, tmp_path: Path) -> None:
+        """Reviewer marks needs_work; runner reopens the issue for orchestration."""
         _, store, _, issue, mock_proc = self._run_with_side_effect(
             tmp_path,
             has_reviewer=True,
             worker_outcome="success",
-            reviewer_changes_outcome=True,
+            reviewer_marks_needs_work=True,
         )
         assert mock_proc.run.call_count == 2
         updated = store.get(issue["id"])
         assert updated is not None
-        assert updated.get("outcome") == "expanded"
-        children = store.children(issue["id"])
-        assert len(children) == 1
-        assert children[0]["title"] == "Fix: something"
+        # Runner clears outcome + reopens so orchestrator.md runs next.
+        assert updated.get("status") == "open"
+        assert updated.get("outcome") is None
+        assert updated.get("execution_spec") is None
 
     def test_resolve_config_regression(self, tmp_path: Path) -> None:
         """Extracted _resolve_config produces same results as old inline code."""
@@ -492,8 +488,8 @@ class TestCollapseReview:
         assert mock_proc.run.call_count == 0
         assert result.status == "root_final"
 
-    def test_collapse_review_creates_remediation(self, tmp_path: Path) -> None:
-        """Reviewer creates new child → outcome stays expanded, loop continues."""
+    def test_collapse_review_needs_work_triggers_orchestrator_remediation(self, tmp_path: Path) -> None:
+        """Collapse reviewer marks needs_work; orchestrator expands remediation children."""
         store, forum, root, _ = self._setup_expanded(tmp_path)
         runner = DagRunner(store, forum, tmp_path)
         root_id = root["id"]
@@ -504,16 +500,19 @@ class TestCollapseReview:
         def backend_side_effect(prompt, model, reasoning, cwd, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
-                # Collapse reviewer creates a remediation child
-                remediation = store.create(
-                    "Fix gap", tags=["node:agent"]
-                )
+                # Collapse reviewer rejects aggregate; orchestrator will handle expansion.
+                store.update(root_id, outcome="needs_work")
+            elif call_count[0] == 2:
+                # Orchestrator expands: creates remediation child + keeps parent expanded.
+                remediation = store.create("Fix gap", tags=["node:agent"])
                 store.add_dep(remediation["id"], "parent", root_id)
                 remediation_id.append(remediation["id"])
-            elif call_count[0] == 2:
+                store.close(root_id, outcome="expanded")
+            elif call_count[0] == 3:
                 # Worker closes the remediation issue directly
                 store.close(remediation_id[0], outcome="success")
-            # call_count[0] == 3: second collapse review — no new children
+            # call_count[0] == 4: per-issue review on remediation (no state change)
+            # call_count[0] == 5: second collapse review (passes)
             return 0
 
         with patch("inshallah.dag.get_backend") as mock_backend, \
@@ -523,13 +522,14 @@ class TestCollapseReview:
             mock_backend.return_value = mock_proc
             mock_formatter.return_value = MagicMock()
 
-            result = runner.run(root_id, max_steps=5)
+            result = runner.run(root_id, max_steps=6)
 
-        # call 1: collapse review (creates remediation)
-        # call 2: worker on remediation
-        # call 3: per-issue review on remediation (reviewer.md exists)
-        # call 4: second collapse review (passes)
-        assert call_count[0] == 4
+        # call 1: collapse review (marks needs_work)
+        # call 2: orchestrator on root (creates remediation child)
+        # call 3: worker on remediation
+        # call 4: per-issue review on remediation (reviewer.md exists)
+        # call 5: second collapse review (passes)
+        assert call_count[0] == 5
         updated = store.get(root_id)
         assert updated is not None
         assert updated["outcome"] == "success"

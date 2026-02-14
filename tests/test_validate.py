@@ -42,8 +42,8 @@ class TestValidateBasic:
         store.add_dep(child["id"], "parent", root["id"])
         store.close(child["id"], outcome="failure")
         v = store.validate(root["id"])
-        assert v.is_final is True
-        assert "failures" in v.reason
+        assert v.is_final is False
+        assert "needs work" in v.reason
 
 
 class TestValidateExpanded:
@@ -95,7 +95,7 @@ class TestValidateExpanded:
         assert v.reason == "all work completed"
 
     def test_expanded_child_failure_still_final(self, tmp_path: Path) -> None:
-        """Failure in a descendant stops the DAG even with expanded root."""
+        """Failure in a descendant is not final; it triggers re-orchestration."""
         store = _store(tmp_path)
         root = store.create("root", tags=["node:agent", "node:root"])
         c1 = store.create("child 1", tags=["node:agent"])
@@ -104,8 +104,18 @@ class TestValidateExpanded:
         store.close(c1["id"], outcome="failure")
 
         v = store.validate(root["id"])
-        assert v.is_final is True
-        assert "failures" in v.reason
+        assert v.is_final is False
+        assert "needs work" in v.reason
+
+    def test_expanded_without_children_is_not_final(self, tmp_path: Path) -> None:
+        """Expanded nodes must have children; otherwise the DAG is stuck."""
+        store = _store(tmp_path)
+        root = store.create("root", tags=["node:agent", "node:root"])
+        store.close(root["id"], outcome="expanded")
+
+        v = store.validate(root["id"])
+        assert v.is_final is False
+        assert "expanded without children" in v.reason
 
     def test_nested_expansion(self, tmp_path: Path) -> None:
         """Root expanded → child expanded → grandchildren open → NOT final."""

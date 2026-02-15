@@ -70,17 +70,14 @@ The orchestrator is a `select → execute → validate` loop. On each step:
 3. **Execute** by spawning a subprocess (Claude, Codex, Gemini, etc.) with the rendered prompt. The agent runs, does its work, and closes the issue via the `inshallah` CLI.
 4. **Validate** whether the DAG is done. Failures and review rejections do **not** halt the run: they are logged to the forum and the orchestrator is re-invoked to expand the issue into remediation children. If everything collapses back to the root with `success`: done. Otherwise: loop.
 
-There's an optional **review phase** after each successful execution: a reviewer agent independently evaluates the work and either passes it or marks it `needs_work`. The reviewer does not create new issues. There's also a **collapse review** phase that fires when all children of an expanded node finish — an aggregate check that the parts actually satisfy the whole; if it fails, the reviewer marks `needs_work` and the orchestrator expands follow-up remediation work.
-
 The loop terminates when the DAG reaches a final state (collapse all the way back to the root), or when it hits the step limit. The runner should not reach "no executable leaves"; if it does, it re-invokes the orchestrator to repair/expand the DAG. On resume (`inshallah resume <root-id>`), any in-progress issues are reset to open and the loop picks up where it left off.
 
 ### Programmability: roles and execution configuration
 
-Roles are markdown files in `.inshallah/roles/` with YAML frontmatter. `inshallah init` scaffolds three:
+Roles are markdown files in `.inshallah/roles/` with YAML frontmatter. `inshallah init` scaffolds two:
 
 - **orchestrator** — decomposes root goals into child issues, assigns roles, manages dependency order. This is the planner.
 - **worker** — executes exactly one atomic issue end-to-end (code, tests, docs, whatever), then closes it with a terminal outcome.
-- **reviewer** — independently verifies completed work. If the work is good, it does nothing. If there are real functional issues, it marks the issue `needs_work` and explains why; the orchestrator expands remediation children.
 
 Each role specifies its own `cli`, `model`, and `reasoning` level in its frontmatter. You can create as many roles as you want — a `researcher` that uses Claude Opus for deep analysis, a `scripter` that uses a fast model for boilerplate, whatever.
 
@@ -109,7 +106,7 @@ The `expanded` outcome is special: it means "I'm done as a planning node, my rea
 
 **Contraction** is how the DAG resolves. As workers close leaf issues with outcomes (`success`, `skipped`) or signal `failure`, the set of ready leaves shifts. Blocking edges dissolve as their prerequisites close. When an issue fails (or is marked `needs_work`), the orchestrator expands it into smaller remediation leaves and the loop continues.
 
-When all children of an expanded node reach successful terminal outcomes, the node becomes **collapsible**. If a reviewer is configured, a collapse review fires: the reviewer checks whether the aggregate children actually satisfy the parent's original specification. If so, the parent is promoted to `success`. If not, the reviewer marks `needs_work` and the orchestrator creates new remediation children — the DAG re-expands locally.
+When all children of an expanded node reach successful terminal outcomes, the node becomes **collapsible** and is automatically promoted to `success`. No agent invocation is needed for this — the runner handles it directly.
 
 This is the breathing pattern: the DAG expands when planning decomposes goals, and contracts when execution closes leaves. Failures and `needs_work` are not halts; they are triggers for re-expansion. The whole thing converges when everything collapses back to the root with `success`.
 

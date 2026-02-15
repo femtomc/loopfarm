@@ -99,7 +99,7 @@ def test_dag_runner_emits_correlated_events(tmp_path: Path) -> None:
         mock_backend.return_value = mock_proc
         mock_formatter.return_value = MagicMock()
 
-        runner.run(root["id"], max_steps=2, review=False)
+        runner.run(root["id"], max_steps=2)
 
     events = _read_events(lf)
     for ev in events:

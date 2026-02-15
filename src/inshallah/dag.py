@@ -219,79 +219,6 @@ class DagRunner:
         )
         return exit_code, elapsed
 
-    # ------------------------------------------------------------------
-    # Review helpers
-    # ------------------------------------------------------------------
-
-    def _has_reviewer(self) -> bool:
-        return (self.repo_root / ".inshallah" / "roles" / "reviewer.md").exists()
-
-    def _maybe_review(
-        self, issue: dict, root_id: str, step: int
-    ) -> dict:
-        """Run reviewer if conditions are met. Returns the (possibly updated) issue."""
-        issue_id = issue["id"]
-
-        # Guards
-        if issue.get("outcome") != "success":
-            return issue
-        if not self._has_reviewer():
-            return issue
-
-        self.events.emit(
-            "dag.review.start",
-            source="dag_runner",
-            issue_id=issue_id,
-            payload={"root_id": root_id, "step": step},
-        )
-
-        self._phase_header(
-            "Review",
-            subtitle=f"{issue_id} {issue['title']}",
-            style="magenta",
-        )
-
-        # Build a synthetic issue dict routed to the reviewer role
-        review_issue = dict(issue)
-        review_issue["execution_spec"] = {"role": "reviewer"}
-
-        cli, model, reasoning, prompt_path = self._resolve_config(review_issue)
-        exit_code, elapsed = self._execute_backend(
-            review_issue,
-            cli,
-            model,
-            reasoning,
-            prompt_path,
-            root_id,
-            log_suffix="review",
-        )
-
-        # Log review to forum
-        self.forum.post(
-            f"issue:{issue_id}",
-            json.dumps(
-                {
-                    "step": step,
-                    "issue_id": issue_id,
-                    "title": issue["title"],
-                    "exit_code": exit_code,
-                    "elapsed_s": round(elapsed, 1),
-                    "type": "review",
-                }
-            ),
-            author="reviewer",
-        )
-
-        # Re-read in case reviewer changed outcome / created children
-        updated = self.store.get(issue_id) or issue
-        self.events.emit(
-            "dag.review.end",
-            source="dag_runner",
-            issue_id=issue_id,
-            payload={"root_id": root_id, "step": step, "outcome": updated.get("outcome")},
-        )
-        return updated
-
     def _reopen_for_orchestration(
         self, issue_id: str, *, reason: str, step: int
     ) -> None:
@@ -378,172 +305,11 @@ class DagRunner:
         return True
 
     # ------------------------------------------------------------------
-    # Collapse review helpers
-    # ------------------------------------------------------------------
-
-    def _collapse_review(
-        self, issue: dict, root_id: str, step: int
-    ) -> None:
-        """Run a collapse review on an expanded node whose children are all done."""
-        issue_id = issue["id"]
-
-        self.events.emit(
-            "dag.collapse_review.start",
-            source="dag_runner",
-            issue_id=issue_id,
-            payload={"root_id": root_id, "step": step},
-        )
-
-        self._phase_header(
-            "Collapse Review",
-            subtitle=f"{issue_id} {issue['title']}",
-            style="magenta",
-        )
-
-        # Build children summary
-        kids = self.store.children(issue_id)
-        lines = []
-        for kid in kids:
-            lines.append(
-                f"- [{kid.get('outcome', '?')}] {kid['id']}: {kid['title']}"
-            )
-        children_summary = "\n".join(lines)
-
-        # Build prompt body: original spec + children summary + instructions
-        original_body = issue.get("body") or ""
-        collapse_prompt = (
-            f"# Collapse Review\n\n"
-            f"## Original Specification\n\n"
-            f"**{issue['title']}**\n\n"
-            f"{original_body}\n\n"
-            f"## Children Outcomes\n\n"
-            f"{children_summary}\n\n"
-            f"## Instructions\n\n"
-            f"All children of this issue have completed. Review whether their "
-            f"aggregate work satisfies the original specification above.\n\n"
-            f"If satisfied: no action needed (the issue will be marked successful).\n\n"
-            f"If NOT satisfied: mark the parent as needing work by running:\n\n"
-            f"  `inshallah issues update {issue_id} --outcome needs_work`\n\n"
-            f"Then explain the gaps in the forum topic (issue:{issue_id}).\n\n"
-            f"Do NOT create child issues yourself; the orchestrator will "
-            f"re-expand the issue into remediation children.\n"
-        )
-
-        # Route through reviewer role (cli/model/reasoning from reviewer.md)
-        review_issue = {
-            **issue,
-            "title": f"Collapse review: {issue['title']}",
-            "body": collapse_prompt,
-            "execution_spec": {"role": "reviewer"},
-        }
-
-        cli, model, reasoning, _ = self._resolve_config(review_issue)
-        exit_code, elapsed = self._execute_backend(
-            review_issue,
-            cli,
-            model,
-            reasoning,
-            None,  # no prompt template — body is the full prompt
-            root_id,
-            log_suffix="collapse-review",
-        )
-
-        # Log to forum
-        self.forum.post(
-            f"issue:{issue_id}",
-            json.dumps(
-                {
-                    "step": step,
-                    "issue_id": issue_id,
-                    "title": issue["title"],
-                    "exit_code": exit_code,
-                    "elapsed_s": round(elapsed, 1),
-                    "type": "collapse-review",
-                }
-            ),
-            author="reviewer",
-        )
-
-        # Check: did the reviewer create new children?
-        new_kids = self.store.children(issue_id)
-        open_kids = [k for k in new_kids if k["status"] != "closed"]
-        updated = self.store.get(issue_id) or issue
-
-        # Contract: reviewer marks needs_work; orchestrator expands. We still
-        # tolerate legacy behavior (reviewer directly creates remediation
-        # children).
-        if updated.get("status") != "closed":
-            self.console.print(
-                f"  [yellow]Collapse review left issue open — {issue_id} "
-                f"will be handled by the main loop[/yellow]"
-            )
-            self.events.emit(
-                "dag.collapse_review.end",
-                source="dag_runner",
-                issue_id=issue_id,
-                payload={
-                    "root_id": root_id,
-                    "step": step,
-                    "status": updated.get("status"),
-                    "outcome": updated.get("outcome"),
-                },
-            )
-            return
-        if updated.get("outcome") in self._REORCHESTRATE_OUTCOMES:
-            self.console.print(
-                f"  [yellow]Collapse review marked needs_work — {issue_id} "
-                f"will be re-orchestrated[/yellow]"
-            )
-            self.events.emit(
-                "dag.collapse_review.end",
-                source="dag_runner",
-                issue_id=issue_id,
-                payload={
-                    "root_id": root_id,
-                    "step": step,
-                    "status": updated.get("status"),
-                    "outcome": updated.get("outcome"),
-                },
-            )
-            return
-
-        if open_kids:
-            self.console.print(
-                f"  [yellow]Collapse review created {len(open_kids)} "
-                f"remediation issue(s) — loop continues[/yellow]"
-            )
-            self.events.emit(
-                "dag.collapse_review.end",
-                source="dag_runner",
-                issue_id=issue_id,
-                payload={
-                    "root_id": root_id,
-                    "step": step,
-                    "status": updated.get("status"),
-                    "outcome": updated.get("outcome"),
-                    "open_kids": len(open_kids),
-                },
-            )
-            return
-
-        # All satisfied — promote to success
-        self.store.update(issue_id, outcome="success")
-        self.console.print(
-            f"  [green]Collapse review passed — {issue_id} → success[/green]"
-        )
-        self.events.emit(
-            "dag.collapse_review.end",
-            source="dag_runner",
-            issue_id=issue_id,
-            payload={"root_id": root_id, "step": step, "outcome": "success"},
-        )
-
-    # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
 
     def run(
-        self, root_id: str, max_steps: int = 20, *, review: bool = True
+        self, root_id: str, max_steps: int = 20
     ) -> DagResult:
         run_id = current_run_id() or new_run_id()
         with run_context(run_id=run_id):
@@ -551,7 +317,7 @@ class DagRunner:
                 "dag.run.start",
                 source="dag_runner",
                 issue_id=root_id,
-                payload={"root_id": root_id, "max_steps": max_steps, "review": review},
+                payload={"root_id": root_id, "max_steps": max_steps},
             )
 
             final: DagResult | None = None
@@ -560,12 +326,12 @@ class DagRunner:
                     # 0. Unstick: failures / needs_work trigger re-orchestration.
                     self._maybe_unstick(root_id, step + 1)
 
-                    # 1. Collapse review (before termination check)
-                    if review and self._has_reviewer():
-                        collapsible = self.store.collapsible(root_id)
-                        if collapsible:
-                            self._collapse_review(collapsible[0], root_id, step + 1)
-                            continue
+                    # 1. Auto-promote collapsible expanded nodes
+                    collapsible = self.store.collapsible(root_id)
+                    for node in collapsible:
+                        self.store.update(node["id"], outcome="success")
+                    if collapsible:
+                        continue
 
                     # 2. Check termination
                     v = self.store.validate(root_id)
@@ -709,12 +475,6 @@ class DagRunner:
                         # re-orchestrate so we don't get stuck with in_progress work.
                         updated = self.store.close(issue_id, outcome="failure")
                         self.console.print("  [red]Marked as failure[/red]")
-
-                    # 7b. Review phase
-                    if review and updated["status"] == "closed":
-                        updated = self._maybe_review(
-                            updated, root_id, step + 1
-                        )
 
                     # 8. Log to forum
                     self.forum.post(

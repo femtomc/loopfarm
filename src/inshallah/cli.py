@@ -40,7 +40,6 @@ def _run_parser(prog: str = "inshallah run") -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog, add_help=False)
     p.add_argument("prompt", nargs="*")
     p.add_argument("--max-steps", type=int, default=20)
-    p.add_argument("--review", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--json", action="store_true")
     return p
 
@@ -167,7 +166,7 @@ def cmd_init(console: Console, *, force: bool = False) -> int:
 
     roles_dir = lf / "roles"
     roles_dir.mkdir(exist_ok=True)
-    for role_name in ("worker", "reviewer"):
+    for role_name in ("worker",):
         dest = roles_dir / f"{role_name}.md"
         if force or not dest.exists():
             shutil.copy2(prompts_dir / "roles" / f"{role_name}.md", dest)
@@ -342,7 +341,6 @@ def cmd_resume(argv: list[str], console: Console) -> int:
     issue_id = argv[0]
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--max-steps", type=int, default=20)
-    p.add_argument("--review", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv[1:])
 
@@ -400,9 +398,7 @@ def cmd_resume(argv: list[str], console: Console) -> int:
     run_id = new_run_id()
     with run_context(run_id=run_id):
         runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
-        result = runner.run(
-            root_id, max_steps=args.max_steps, review=args.review
-        )
+        result = runner.run(root_id, max_steps=args.max_steps)
 
     if args.json:
         _output(
@@ -572,11 +568,7 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
             )
 
         runner = DagRunner(store, forum, root, console=_runner_console(console, json_mode=args.json))
-        result = runner.run(
-            root_issue["id"],
-            max_steps=args.max_steps,
-            review=args.review,
-        )
+        result = runner.run(root_issue["id"], max_steps=args.max_steps)
 
     if args.json:
         _output(
@@ -1549,7 +1541,7 @@ _GUIDE_CONCEPTS: list[tuple[str, str, str]] = [
     ),
     (
         "roles",
-        "Routing metadata for which agent prompt/config should execute an issue (for example `worker` or `reviewer`).",
+        "Routing metadata for which agent prompt/config should execute an issue (for example `worker`).",
         "inshallah roles --table and inshallah issues update <id> --role <name>.",
     ),
     (
@@ -1600,11 +1592,6 @@ _GUIDE_WORKFLOW: list[tuple[str, str, str]] = [
         "Close or expand work",
         "inshallah issues close <issue-id> --outcome success",
         "Workers close with terminal outcomes; orchestrators close with `expanded` after decomposition.",
-    ),
-    (
-        "Review pass (optional role)",
-        "inshallah forum read issue:<issue-id> --limit 50",
-        "Reviewer activity is logged in the issue topic; reviewer can keep success or mark needs_work so the orchestrator expands targeted fixes.",
     ),
     (
         "Validate DAG completion",

@@ -24,13 +24,13 @@ class TestFromDict:
 
     def test_explicit_fields(self) -> None:
         spec = ExecutionSpec.from_dict({
-            "role": "reviewer",
+            "role": "worker",
             "cli": "claude",
             "model": "opus",
             "reasoning": "high",
             "prompt_path": "/some/path.md",
         })
-        assert spec.role == "reviewer"
+        assert spec.role == "worker"
         assert spec.cli == "claude"
         assert spec.model == "opus"
         assert spec.reasoning == "high"
